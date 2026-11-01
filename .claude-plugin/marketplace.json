@@ -1,6 +1,9 @@
 {
   "name": "agent-review-inbox",
-  "owner": { "name": "trickstack" },
+  "description": "A review inbox for agent work that needs a human's eyes.",
+  "owner": {
+    "name": "trickstack"
+  },
   "plugins": [
     {
       "name": "agent-review-inbox",

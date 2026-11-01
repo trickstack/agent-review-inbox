@@ -58,6 +58,9 @@ def add(kind, title, topic="", how="", media=(), by=""):
     slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:40]
     d = os.path.join(DIR, time.strftime("%Y%m%d-%H%M%S-") + slug)
     os.makedirs(d)
+    if not os.path.exists(os.path.join(DIR, ".gitignore")):  # the inbox never ends up in the project's commits
+        with open(os.path.join(DIR, ".gitignore"), "w") as f:
+            print("*", file=f)
     names = []
     for m in dict.fromkeys(os.path.abspath(m) for m in media):  # the same path twice = one file
         # every draft is <dir>/clip.mp4: copying by bare name would keep only the last take and show it N times.

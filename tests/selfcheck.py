@@ -29,6 +29,7 @@ open(png, "wb").write(b"\x89PNG\r\n\x1a\n")
 out = run("add", "--title", "Ball trail", "--how", "watch the ball", "--media", png).stdout
 item = review.items()[0]
 assert item["status"] == "open" and item["sid"] == "s1" and item["media"] == ["still.png"], out
+assert open(os.path.join(tmp, ".gitignore")).read().strip() == "*"  # the inbox ignores itself
 
 # Stop with an open item and nothing waiting -> asked to arm `wait`
 assert "nothing waiting" in hook("Stop")

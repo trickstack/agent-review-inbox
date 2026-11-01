@@ -67,7 +67,7 @@ The CLI, which you can run yourself too:
 | Command | What it does |
 |---|---|
 | `review.py add --title ... --how ... --media ...` | post an item (`--kind bug` for a bug to describe) |
-| `review.py clip 6 --url http://localhost:8080/` | record a page for 6 s (Playwright), draft `clip.mp4` + contact sheet |
+| `review.py clip 6 --url <page>` | record a page for 6 s (Playwright), draft `clip.mp4` + contact sheet |
 | `review.py clip 6 [--window "Title"]` | record the screen or a window (ffmpeg) |
 | `review.py shot --url ...` | still of a page |
 | `review.py wait [<id>]` | block until answered (run in the background) |
@@ -75,8 +75,8 @@ The CLI, which you can run yourself too:
 | `review.py handled / revoke / dismiss` | close the loop on a verdict, take a wrong take down, close a fixed bug |
 | `review.py serve` | the page |
 
-Items live in `<project>/.review-inbox/<id>/` (one folder each, so parallel sessions never write the same file). Add
-`.review-inbox/` to your `.gitignore`.
+Items live in `<project>/.review-inbox/<id>/` (one folder each, so parallel sessions never write the same file). The
+folder ignores itself in git.
 
 ### Your own recorder
 
