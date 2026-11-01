@@ -1,0 +1,7 @@
+{
+  "hooks": {
+    "SessionStart": [{"hooks": [{"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/skills/review-inbox/review.py\" hook 2>/dev/null || python \"${CLAUDE_PLUGIN_ROOT}/skills/review-inbox/review.py\" hook || true", "timeout": 20}]}],
+    "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/skills/review-inbox/review.py\" hook 2>/dev/null || python \"${CLAUDE_PLUGIN_ROOT}/skills/review-inbox/review.py\" hook || true", "timeout": 20}]}],
+    "Stop": [{"hooks": [{"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/skills/review-inbox/review.py\" hook 2>/dev/null || python \"${CLAUDE_PLUGIN_ROOT}/skills/review-inbox/review.py\" hook || true", "timeout": 20}]}]
+  }
+}

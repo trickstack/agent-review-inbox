@@ -1,0 +1,78 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Brickfall</title>
+<!-- A deliberately plain brick breaker: flat boxes, no effects, no sound. It's the canvas for the demo, where an agent adds
+     game feel (trails, particles, screen shake, colours) and posts each change to the review inbox. ?auto=1 plays itself. -->
+<style>
+  html, body { margin:0; height:100%; background:#111; display:grid; place-items:center; }
+  canvas { background:#222; max-width:100vw; max-height:100vh; }
+</style>
+<canvas id="c" width="960" height="540"></canvas>
+<script>
+const c = document.getElementById("c"), g = c.getContext("2d");
+const W = c.width, H = c.height, auto = new URLSearchParams(location.search).has("auto");
+const COLS = 12, ROWS = 6, BW = W / COLS, BH = 24, TOP = 60;
+let paddle, ball, bricks, score, keys = {};
+
+function reset() {
+  paddle = { x: W / 2, w: 120, h: 14, y: H - 40 };
+  ball = { x: W / 2, y: H - 60, vx: 260, vy: -320, r: 8 };
+  bricks = [];
+  for (let r = 0; r < ROWS; r++) for (let k = 0; k < COLS; k++) bricks.push({ x: k * BW, y: TOP + r * BH, alive: true });
+  score = 0;
+}
+
+addEventListener("keydown", e => keys[e.key] = true);
+addEventListener("keyup", e => keys[e.key] = false);
+c.addEventListener("mousemove", e => { const b = c.getBoundingClientRect(); paddle.x = (e.clientX - b.left) * W / b.width; });
+
+function update(dt) {
+  if (auto) paddle.x += (ball.x + Math.sin(ball.x * 0.05) * 30 - paddle.x) * Math.min(1, dt * 8);
+  if (keys.ArrowLeft) paddle.x -= 600 * dt;
+  if (keys.ArrowRight) paddle.x += 600 * dt;
+  paddle.x = Math.max(paddle.w / 2, Math.min(W - paddle.w / 2, paddle.x));
+
+  ball.x += ball.vx * dt;
+  ball.y += ball.vy * dt;
+  if (ball.x < ball.r || ball.x > W - ball.r) { ball.vx *= -1; ball.x = Math.max(ball.r, Math.min(W - ball.r, ball.x)); }
+  if (ball.y < ball.r) { ball.vy = Math.abs(ball.vy); }
+  if (ball.y > H + 40) reset();
+
+  if (ball.vy > 0 && ball.y + ball.r > paddle.y && ball.y < paddle.y + paddle.h && Math.abs(ball.x - paddle.x) < paddle.w / 2 + ball.r) {
+    ball.vy = -Math.abs(ball.vy);
+    ball.vx = (ball.x - paddle.x) / (paddle.w / 2) * 360;
+  }
+  for (const b of bricks) {
+    if (!b.alive || ball.x < b.x || ball.x > b.x + BW || ball.y - ball.r > b.y + BH || ball.y + ball.r < b.y) continue;
+    b.alive = false;
+    ball.vy *= -1;
+    score += 10;
+    break;
+  }
+  if (bricks.every(b => !b.alive)) reset();
+}
+
+function draw() {
+  g.fillStyle = "#222";
+  g.fillRect(0, 0, W, H);
+  g.fillStyle = "#888";
+  for (const b of bricks) if (b.alive) g.fillRect(b.x + 2, b.y + 2, BW - 4, BH - 4);
+  g.fillStyle = "#ccc";
+  g.fillRect(paddle.x - paddle.w / 2, paddle.y, paddle.w, paddle.h);
+  g.fillRect(ball.x - ball.r, ball.y - ball.r, ball.r * 2, ball.r * 2);
+  g.fillStyle = "#aaa";
+  g.font = "18px monospace";
+  g.fillText("SCORE " + score, 16, 30);
+}
+
+let last = performance.now();
+function frame(t) {
+  update(Math.min(0.033, (t - last) / 1000));
+  last = t;
+  draw();
+  requestAnimationFrame(frame);
+}
+reset();
+requestAnimationFrame(frame);
+</script>

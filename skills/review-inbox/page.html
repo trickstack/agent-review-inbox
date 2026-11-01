@@ -1,0 +1,180 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Review inbox</title>
+<style>
+  :root { --bg:#07131c; --card:#0f2533; --line:#1c3a4d; --text:#d6e6ee; --dim:#6f8d9c; --link:#7fd3f7; --ok:#3ddc97; --redo:#ffb454; --bug:#e86a5a; --wait:#fc3; }
+  html { min-height:100%; background:radial-gradient(1200px 500px at 50% -200px, #12405a 0%, transparent 70%) fixed no-repeat, linear-gradient(var(--bg), #0b1e2b) fixed; }
+  body { font:14px system-ui; max-width:980px; margin:1.5em auto; padding:0 16px; color:var(--text); }
+  a { color:var(--link); }
+  h1 { margin:0 0 .4em; font-size:22px; }
+  nav button { background:none; border:1px solid var(--line); color:var(--text); padding:5px 12px; border-radius:6px; cursor:pointer; margin-right:4px; }
+  nav button.on { border-color:var(--link); color:var(--link); }
+  .card { background:var(--card); border:1px solid var(--line); border-left:4px solid var(--line); border-radius:8px; padding:12px 14px; margin:12px 0; }
+  .card.bug { border-left-color:var(--bug); } .card.ok { border-left-color:var(--ok); opacity:.65; } .card.redo { border-left-color:var(--redo); } .card.dismissed { opacity:.4; }
+  /* an agent is blocked on this one right now (review.py wait); the flag drops when it gets the answer or gives up */
+  .card.waiting { border-color:var(--wait); border-left-width:6px; background:#1d1a10; box-shadow:0 0 0 1px var(--wait), 0 0 18px -4px var(--wait); animation:pulse 2s ease-in-out infinite; }
+  @keyframes pulse { 50% { box-shadow:0 0 0 1px var(--wait), 0 0 26px 0 var(--wait); } }
+  @media (prefers-reduced-motion: reduce) { .card.waiting { animation:none; } }
+  .card:not(.waiting) .wbadge { display:none; }
+  .head { display:flex; gap:10px; align-items:baseline; flex-wrap:wrap; }
+  .title { font-weight:600; font-size:15px; }
+  .meta { color:var(--dim); font-size:12px; }
+  .badge { font-size:11px; padding:1px 7px; border-radius:9px; background:#1c3a4d; }
+  .how { margin:6px 0; white-space:pre-wrap; overflow-wrap:anywhere; }
+  .media { display:flex; gap:8px; flex-wrap:wrap; margin:8px 0; }
+  .media img, .media video { max-width:100%; max-height:300px; border-radius:4px; background:#000; }
+  .media .aud { display:flex; flex-direction:column; font-size:12px; gap:2px; }
+  .files { display:flex; flex-wrap:wrap; }
+  .files a { margin-right:10px; font-size:12px; }
+  textarea { width:100%; box-sizing:border-box; min-height:44px; background:#0b1e2b; color:var(--text); border:1px solid var(--line); border-radius:6px; padding:6px; font:inherit; }
+  .acts { margin-top:6px; display:flex; gap:6px; flex-wrap:wrap; }
+  .acts button { padding:5px 14px; border-radius:6px; border:0; cursor:pointer; font-weight:600; }
+  .b-ok { background:var(--ok); color:#000; } .b-redo { background:var(--redo); color:#000; } .b-note { background:var(--link); color:#000; } .b-dis { background:#1c3a4d; color:var(--text); }
+  .empty { color:var(--dim); margin:2em 0; }
+  .pend, .reply { display:flex; gap:6px; flex-wrap:wrap; margin-top:6px; }
+  .pend img, .reply img { max-height:90px; border-radius:4px; border:1px solid var(--line); display:block; }
+  .thumb { position:relative; }
+  .thumb .x { position:absolute; top:3px; right:3px; width:22px; height:22px; padding:0; border:0; border-radius:50%; cursor:pointer;
+    background:rgba(0,0,0,.75); color:#fff; font:16px/22px system-ui; }
+  .thumb .x:hover { background:var(--bug); }
+  .card.drop { outline:2px dashed var(--link); }
+</style>
+<h1>Review inbox</h1>
+<nav id="tabs"></nav>
+<div id="list"></div>
+<nav><button id="more" hidden></button></nav>
+<script>
+const TABS = { open: "Open", bug: "Bugs", answered: "Answered", all: "All" };
+const PAGE = 20;  // a long Answered history with hundreds of clips froze the page when drawn all at once
+let tab = "open", data = [], limit = PAGE;
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+// escape, then turn http(s) URLs into links (trailing punctuation stays text)
+const linkify = s => esc(s).replace(/https?:\/\/[^\s<>"]*[^\s<>".,;:!?)\]']/g, u => `<a href="${u}" target="_blank">${u}</a>`);
+const match = (i, k) => k === "all" || (k === "open" && i.status === "open" && i.kind !== "bug") || (k === "bug" && i.kind === "bug")
+  || (k === "answered" && i.status !== "open");
+const show = i => match(i, tab);
+
+function media(i) {
+  const base = `/media/${encodeURIComponent(i.id)}/`;
+  // contact sheets (sheet.jpg, clip_sheet.jpg) are for agents to read; only stills an agent attached on purpose are shown
+  const vis = i.media.filter(m => /\.(png|jpe?g|gif|webp|mp4|webm|wav|mp3|ogg)$/i.test(m) && !/sheet\.jpg$/i.test(m)).map(m => /\.(mp4|webm)$/i.test(m)
+    ? `<video src="${base + encodeURIComponent(m)}" controls muted preload="metadata"></video>`
+    : /\.(wav|mp3|ogg)$/i.test(m)
+    ? `<div class="aud"><span>${esc(m)}</span><audio src="${base + encodeURIComponent(m)}" controls preload="none"></audio></div>`
+    : `<a href="${base + encodeURIComponent(m)}" target="_blank"><img src="${base + encodeURIComponent(m)}" loading="lazy"></a>`).join("");
+  const files = i.media.map(m => `<a href="${base + encodeURIComponent(m)}" target="_blank">${esc(m)}</a>`).join("");
+  return `<div class="media">${vis}</div><div class="files">${files}</div>`;
+}
+
+function card(i) {
+  const btns = i.kind === "bug"
+    ? `<button class="b-note" data-s="open">Save note</button><button class="b-dis" data-s="dismissed">Dismiss</button>`
+    : `<button class="b-ok" data-s="ok">OK</button><button class="b-redo" data-s="redo">Redo</button><button class="b-dis" data-s="dismissed">Dismiss</button>`;
+  return `<div class="card ${i.kind} ${i.status}${i.waiting ? " waiting" : ""}" data-id="${esc(i.id)}">
+    <div class="head"><span class="title">${linkify(i.title)}</span>
+      <span class="badge wbadge" style="background:var(--wait);color:#000">agent waiting</span>
+      ${i.kind === "bug" ? '<span class="badge" style="background:var(--bug);color:#000">bug</span>' : ""}
+      ${i.topic ? `<span class="badge">${esc(i.topic)}</span>` : ""}
+      <span class="meta">${esc(i.created)}${i.by ? "&emsp;" + esc(i.by) : ""}&emsp;${esc(i.status)}${i.answered ? " " + esc(i.answered) : ""}</span></div>
+    ${i.how ? `<div class="how">${linkify(i.how)}</div>` : ""}
+    ${media(i)}
+    <textarea placeholder="${i.kind === "bug" ? "What happened?" : "Notes (what looks or feels off, what to change)"} - paste or drop images here">${esc(drafts[i.id] ?? i.note)}</textarea>
+    ${i.reply?.length ? `<div class="reply">${i.reply.map(r => `<span class="thumb"><a href="/media/${encodeURIComponent(i.id)}/${encodeURIComponent(r)}" target="_blank"><img src="/media/${encodeURIComponent(i.id)}/${encodeURIComponent(r)}" loading="lazy"></a><button class="x" data-unreply="${esc(r)}" title="Remove this image">×</button></span>`).join("")}</div>` : ""}
+    <div class="pend">${pendThumbs(i.id)}</div>
+    <div class="acts">${btns}<button class="b-dis" data-pick>Attach image</button><input type="file" accept="image/*" multiple hidden></div></div>`;
+}
+
+function render() {
+  document.getElementById("tabs").innerHTML = Object.entries(TABS).map(([k, v]) =>
+    `<button class="${k === tab ? "on" : ""}" data-tab="${k}">${v} (${data.filter(i => match(i, k)).length})</button>`).join("");
+  // Keyed: unchanged cards keep their DOM node, so loaded media doesn't re-layout and shove the page around,
+  // playing clips keep playing, and dismissing a card just lets the ones below move up.
+  // Never detach a card that stays: moving a node drops fullscreen and the browser's scroll anchor.
+  const list = document.getElementById("list"), all = data.filter(show), items = all.slice(0, limit), more = document.getElementById("more");
+  more.hidden = all.length <= limit;
+  more.textContent = `Show ${Math.min(PAGE, all.length - limit)} more (${all.length - limit} left)`;
+  const old = new Map([...list.querySelectorAll(".card")].map(c => [c.dataset.id, c]));
+  const nodes = items.map(i => {
+    const { waiting, ...rest } = i, key = JSON.stringify(rest), c = old.get(i.id);  // waiting flips as agents arm/drop `wait`: toggle it, don't rebuild
+    if (c && c._key === key) { c.classList.toggle("waiting", !!waiting); return c; }
+    const t = document.createElement("template");
+    t.innerHTML = card(i).trim();
+    const n = t.content.firstChild;
+    n._key = key;
+    if (c) c.replaceWith(n);  // in place, so the cards after it stay put
+    return n;
+  });
+  if (!nodes.length) return list.replaceChildren(Object.assign(document.createElement("p"), { className: "empty", textContent: "Nothing here." }));
+  const keep = new Set(nodes);
+  [...list.children].forEach(c => keep.has(c) || c.remove());  // drop the gone ones first, so no survivor gets shuffled
+  nodes.forEach((n, k) => { if (list.children[k] !== n) list.insertBefore(n, list.children[k] || null); });
+}
+
+// Unsaved notes live here (and in localStorage) until a button saves them, so refreshes and reloads never eat typing.
+let drafts = {};
+try { drafts = JSON.parse(localStorage.reviewDrafts || "{}"); } catch {}
+const keepDrafts = () => { try { localStorage.reviewDrafts = JSON.stringify(drafts); } catch {} };
+document.addEventListener("input", e => {
+  const c = e.target.closest(".card");
+  if (c && e.target.tagName === "TEXTAREA") { drafts[c.dataset.id] = e.target.value; keepDrafts(); }
+});
+
+// Images attached to an answer but not saved yet (data URLs); they go up with the next button press.
+const pending = {};
+const pendThumbs = id => (pending[id] || []).map((u, k) => `<span class="thumb"><img src="${u}"><button class="x" data-rm="${k}" title="Remove">×</button></span>`).join("");
+const showPend = c => { c.querySelector(".pend").innerHTML = pendThumbs(c.dataset.id); };
+function addImages(c, files) {
+  for (const f of files) if (f.type.startsWith("image/")) {
+    const r = new FileReader();
+    r.onload = () => { (pending[c.dataset.id] ||= []).push(r.result); showPend(c); };
+    r.readAsDataURL(f);
+  }
+}
+document.addEventListener("paste", e => {
+  const c = e.target.closest?.(".card"), files = [...(e.clipboardData?.files || [])];
+  if (c && files.length) { e.preventDefault(); addImages(c, files); }
+});
+document.addEventListener("dragover", e => { const c = e.target.closest?.(".card"); if (c) { e.preventDefault(); c.classList.add("drop"); } });
+document.addEventListener("dragleave", e => e.target.closest?.(".card")?.classList.remove("drop"));
+document.addEventListener("drop", e => {
+  const c = e.target.closest?.(".card");
+  if (c) { e.preventDefault(); c.classList.remove("drop"); addImages(c, e.dataTransfer.files); }
+});
+document.addEventListener("change", e => {
+  if (e.target.type === "file") { addImages(e.target.closest(".card"), e.target.files); e.target.value = ""; }
+});
+
+let lastRaw = "";
+async function load() {
+  const raw = await (await fetch("/api/review")).text();
+  const n = JSON.parse(raw).filter(i => i.waiting).length;  // the tab title updates even while typing
+  document.title = (n ? `(${n}) ` : "") + "Review inbox";
+  if (raw === lastRaw || document.activeElement?.tagName === "TEXTAREA") return;  // redraws restart playing clips
+  lastRaw = raw;
+  data = JSON.parse(raw);
+  data.sort((a, b) => b.id.localeCompare(a.id));  // newest first, always (ids start with yyyymmdd-hhmmss)
+  render();
+}
+
+document.addEventListener("click", async e => {
+  const t = e.target;
+  if (t.id === "more") { limit += PAGE; return render(); }
+  if (t.dataset.tab) { tab = t.dataset.tab; limit = PAGE; try { localStorage.reviewTab = tab; } catch {} return render(); }
+  const c = t.closest(".card");
+  if (t.dataset.pick !== undefined) return c.querySelector("input[type=file]").click();
+  if (t.dataset.rm !== undefined) { pending[c.dataset.id].splice(+t.dataset.rm, 1); return showPend(c); }
+  if (!t.dataset.s && !t.dataset.unreply) return;
+  const r = await fetch("/api/review", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(t.dataset.unreply ? { id: c.dataset.id, remove: t.dataset.unreply }
+      : { id: c.dataset.id, status: t.dataset.s, note: c.querySelector("textarea").value, images: pending[c.dataset.id] || [] }) });
+  if (!r.ok) return alert("Save failed: " + r.status);
+  const upd = await r.json();
+  if (!t.dataset.unreply) { delete drafts[upd.id]; delete pending[upd.id]; keepDrafts(); }  // removing an image keeps unsaved typing
+  data = data.map(i => i.id === upd.id ? upd : i);
+  t.blur(); render();
+});
+
+try { tab = localStorage.reviewTab || tab; } catch {}
+load(); setInterval(load, 5000);
+</script>

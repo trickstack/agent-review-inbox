@@ -1,0 +1,11 @@
+{
+  "name": "agent-review-inbox",
+  "owner": { "name": "TBD" },
+  "plugins": [
+    {
+      "name": "agent-review-inbox",
+      "source": "./",
+      "description": "A review inbox for agent work that needs a human's eyes."
+    }
+  ]
+}
