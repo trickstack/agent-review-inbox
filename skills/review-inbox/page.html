@@ -22,7 +22,6 @@
   nav#tabs button.on { background:var(--panel2); color:var(--text); box-shadow:0 0 0 1px var(--line); }
   nav#tabs .n { margin-left:6px; font-size:12px; color:var(--dim); }
   .card { position:relative; background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:18px 20px; margin:14px 0; box-shadow:var(--shadow); }
-  .card.ok, .card.dismissed, .card.answered { opacity:.6; } .card.ok:hover, .card.dismissed:hover, .card.answered:hover { opacity:1; }
   /* an agent is blocked on this one right now (review.py wait); the flag drops when it gets the answer or gives up */
   .card.waiting { border-color:var(--wait); box-shadow:0 0 0 1px var(--wait), 0 0 28px -6px var(--wait), var(--shadow); animation:pulse 2.4s ease-in-out infinite; }
   @keyframes pulse { 50% { box-shadow:0 0 0 1px var(--wait), 0 0 40px -2px var(--wait), var(--shadow); } }
