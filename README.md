@@ -90,7 +90,8 @@ Point it at `skills/review-inbox/SKILL.md` (paste it into your AGENTS.md or rule
 `--session <any stable id>` so it owns its items. You get the inbox, notifications and `wait`; the turn-end enforcement
 needs a hook system that can block the end of a turn.
 
-Needs Python 3.9+. Optional capture tools; `review.py doctor` says which are missing and how to install them, and the
+Needs Python 3.9+ (`winget install Python.Python.3.12`, `brew install python`, `sudo apt install python3`). Without
+it the inbox is off, and the SessionStart hook tells the agent so it can offer to install it. Optional capture tools; `review.py doctor` says which are missing and how to install them, and the
 SessionStart hook tells the agent too:
 
 | Tool | For | Install |

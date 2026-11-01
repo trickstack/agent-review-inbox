@@ -1,7 +1,7 @@
 {
   "hooks": {
-    "SessionStart": [{"hooks": [{"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/skills/review-inbox/review.py\" hook 2>/dev/null || python \"${CLAUDE_PLUGIN_ROOT}/skills/review-inbox/review.py\" hook || true", "timeout": 20}]}],
-    "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/skills/review-inbox/review.py\" hook 2>/dev/null || python \"${CLAUDE_PLUGIN_ROOT}/skills/review-inbox/review.py\" hook || true", "timeout": 20}]}],
-    "Stop": [{"hooks": [{"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/skills/review-inbox/review.py\" hook 2>/dev/null || python \"${CLAUDE_PLUGIN_ROOT}/skills/review-inbox/review.py\" hook || true", "timeout": 20}]}]
+    "SessionStart": [{"hooks": [{"type": "command", "command": "R=\"${CLAUDE_PLUGIN_ROOT}/skills/review-inbox/review.py\"; for P in python3 python; do $P -c \"\" 2>/dev/null && break; P=; done; if [ -n \"$P\" ]; then $P \"$R\" hook; else echo \"agent-review-inbox: Python 3 isn't installed, so the review inbox is off. Offer to install it (Windows: \\`winget install Python.Python.3.12\\`; macOS: \\`brew install python\\`; Linux: \\`sudo apt install python3\\`), then restart the session.\"; fi", "timeout": 20}]}],
+    "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "R=\"${CLAUDE_PLUGIN_ROOT}/skills/review-inbox/review.py\"; for P in python3 python; do $P -c \"\" 2>/dev/null && break; P=; done; if [ -n \"$P\" ]; then $P \"$R\" hook; else true; fi", "timeout": 20}]}],
+    "Stop": [{"hooks": [{"type": "command", "command": "R=\"${CLAUDE_PLUGIN_ROOT}/skills/review-inbox/review.py\"; for P in python3 python; do $P -c \"\" 2>/dev/null && break; P=; done; if [ -n \"$P\" ]; then $P \"$R\" hook; else true; fi", "timeout": 20}]}]
   }
 }
