@@ -2,11 +2,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Brickfall</title>
-<!-- A deliberately plain brick breaker: flat boxes, no effects, no sound. It's the canvas for the demo, where an agent adds
-     game feel (trails, particles, screen shake, colours) and posts each change to the review inbox. ?auto=1 plays itself. -->
+<!-- A small neon brick breaker with no motion juice yet: no trail, no particles, no screen shake, no sound. It's the canvas
+     for the demo, where an agent adds game feel and posts each change to the review inbox. ?auto=1 plays itself. -->
 <style>
-  html, body { margin:0; height:100%; background:#111; display:grid; place-items:center; }
-  canvas { background:#222; max-width:100vw; max-height:100vh; }
+  html, body { margin:0; height:100%; overflow:hidden; background:#07040f; display:grid; place-items:center; }
+  canvas { display:block; width:min(100vw, 100vh * 16 / 9); height:auto; }  /* fills a 16:9 window edge to edge, so clips have no border */
 </style>
 <canvas id="c" width="960" height="540"></canvas>
 <script>
@@ -53,17 +53,36 @@ function update(dt) {
   if (bricks.every(b => !b.alive)) reset();
 }
 
+function glow(color, blur) { g.shadowColor = color; g.shadowBlur = blur; g.fillStyle = color; }
+
+function box(x, y, w, h, r) { g.beginPath(); g.roundRect(x, y, w, h, r); g.fill(); }
+
 function draw() {
-  g.fillStyle = "#222";
+  const bg = g.createLinearGradient(0, 0, 0, H);
+  bg.addColorStop(0, "#120826");
+  bg.addColorStop(1, "#05030c");
+  g.shadowBlur = 0;
+  g.fillStyle = bg;
   g.fillRect(0, 0, W, H);
-  g.fillStyle = "#888";
-  for (const b of bricks) if (b.alive) g.fillRect(b.x + 2, b.y + 2, BW - 4, BH - 4);
-  g.fillStyle = "#ccc";
-  g.fillRect(paddle.x - paddle.w / 2, paddle.y, paddle.w, paddle.h);
-  g.fillRect(ball.x - ball.r, ball.y - ball.r, ball.r * 2, ball.r * 2);
-  g.fillStyle = "#aaa";
-  g.font = "18px monospace";
-  g.fillText("SCORE " + score, 16, 30);
+  g.strokeStyle = "rgba(123, 44, 255, 0.10)";  // faint synthwave grid
+  g.lineWidth = 1;
+  for (let x = 0; x <= W; x += 40) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, H); g.stroke(); }
+  for (let y = 0; y <= H; y += 40) { g.beginPath(); g.moveTo(0, y); g.lineTo(W, y); g.stroke(); }
+
+  for (const b of bricks) if (b.alive) {
+    const row = (b.y - TOP) / BH;
+    glow(`hsl(${330 - row * 38}, 100%, 62%)`, 14);  // pink at the top, through violet and blue, to cyan
+    box(b.x + 3, b.y + 3, BW - 6, BH - 6, 4);
+  }
+  glow("#00e5ff", 24);
+  box(paddle.x - paddle.w / 2, paddle.y, paddle.w, paddle.h, 7);
+  glow("#ffffff", 26);
+  g.shadowColor = "#00e5ff";
+  g.beginPath(); g.arc(ball.x, ball.y, ball.r, 0, Math.PI * 2); g.fill();
+  glow("#ff4fd8", 12);
+  g.font = "bold 20px ui-monospace, Consolas, monospace";
+  g.fillText("SCORE " + score, 18, 32);
+  g.shadowBlur = 0;
 }
 
 let last = performance.now();
