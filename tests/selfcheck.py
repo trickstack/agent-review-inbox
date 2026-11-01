@@ -100,6 +100,14 @@ time.sleep(1.5)
 review.answer(qi["id"], "answered", "Blue")
 got, _ = qw.communicate(timeout=10)
 assert qw.returncode == 0 and 'ANSWER to your question "Red or blue paddle?"' in got and "Blue" in got, got
+# answered in the chat instead: the next prompt closes the session's open questions (not its reviews), without a verdict
+subprocess.run([sys.executable, CLI, "--session", "q3", "ask", "Bigger ball?"], env=env, capture_output=True)
+subprocess.run([sys.executable, CLI, "--session", "q3", "add", "--title", "Paddle glow"], env=env, capture_output=True)
+said = subprocess.run([sys.executable, CLI, "hook"], env=env, capture_output=True, text=True,
+                      input=json.dumps({"session_id": "q3", "hook_event_name": "UserPromptSubmit", "prompt": "yes, twice as big"})).stdout
+q3 = {i["title"]: i for i in review.items() if i["sid"] == "q3"}
+assert q3["Bigger ball?"]["note"] == "answered in the chat: yes, twice as big" and not q3["Paddle glow"].get("answered")
+assert "Bigger ball?" not in said, said
 
 
 def stop_after(text, active=False, sid="q2", transcript=None):

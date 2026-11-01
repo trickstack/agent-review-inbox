@@ -625,6 +625,11 @@ def hook():
                 f"{w} (disables {d}): {f}" for w, d, f in missing) + f". Details: {cli(sid)} doctor")
         return
     stop = name == "Stop"
+    if name == "UserPromptSubmit":  # a reply in the chat overtakes this session's open questions; reviews stay open
+        for i in mine(sid):
+            if i.get("kind") == "question" and not i.get("answered"):
+                done = answer(i["id"], "answered", "answered in the chat: " + (ev.get("prompt") or "")[:300])
+                mark(i["id"], "delivered", answer_key(done))  # it isn't news to the agent: don't hand it back as a verdict
     found = undelivered(sid)
     if found:
         text = act(sid) + deliver(found)
