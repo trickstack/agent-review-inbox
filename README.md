@@ -107,7 +107,8 @@ screen recording and desktop steps need an X11 session; Wayland isn't supported.
 ## Use
 
 Nothing to configure. The SessionStart hook tells the agent the inbox exists, and the `review-inbox` skill teaches it the
-protocol. The page starts on demand the first time something is posted: http://127.0.0.1:7700/.
+protocol. The page starts on demand the first time something is posted: http://127.0.0.1:7700/. It's one inbox for all your
+projects: each card shows which project it came from, and clicking that badge shows only that project.
 
 Questions land there too. When an agent needs you to decide something, it posts the question with `review.py ask`, optionally with one-click options, instead of asking in a chat you might never look at. The Stop hook catches a turn that ends on a question asked in chat.
 
@@ -127,8 +128,8 @@ The CLI, which you can run yourself too:
 | `review.py handled / revoke / dismiss` | close the loop on a verdict, take a wrong take down, close an item nobody needs to answer |
 | `review.py serve` | the page |
 
-Items live in `<project>/.review-inbox/<id>/` (one folder each, so parallel sessions never write the same file). The
-folder ignores itself in git.
+Items live in `~/.review-inbox/<id>/`, one folder each, so parallel sessions never write the same file. Each item records
+its project and the session that posted it, so verdicts go back to the right agent.
 
 ### Your own recorder
 
@@ -143,8 +144,8 @@ export REVIEW_INBOX_CLIP_CMD='my-recorder --last {seconds} --out "{out}"'
 
 | Variable | Default | |
 |---|---|---|
-| `REVIEW_INBOX_DIR` | `<project>/.review-inbox` | where items live; point several projects at one folder (with one port) to review them all on one page |
-| `REVIEW_INBOX_PORT` | `7700` | page port (give each project its own) |
+| `REVIEW_INBOX_DIR` | `~/.review-inbox` | where items live; to keep a project's items apart, point it at `<project>/.review-inbox` and give it its own port |
+| `REVIEW_INBOX_PORT` | `7700` | page port |
 | `REVIEW_INBOX_HOST` | `127.0.0.1` | set `0.0.0.0` to review from your phone over a VPN; there is no auth |
 | `REVIEW_INBOX_WARM_MIN` | `50` | idle minutes after which a prompt cache counts as cold |
 | `REVIEW_INBOX_CLIP_CMD` | | custom capture command |

@@ -208,4 +208,33 @@ raw = subprocess.run([sys.executable, CLI, "hook"], env=ENV, capture_output=True
                      input=json.dumps({"session_id": "s1", "hook_event_name": "UserPromptSubmit"}).encode()).stdout
 assert "gör 日本 🙂" in raw.decode("utf-8"), raw
 
+# one inbox per user: two projects post without configuring anything, both show on one page, labelled, and each
+# verdict goes back only to the session that posted it
+home = tempfile.mkdtemp()
+base_env = {k: v for k, v in ENV.items() if k not in ("REVIEW_INBOX_DIR", "CLAUDE_CODE_SESSION_ID")}
+base_env.update(HOME=home, USERPROFILE=home, REVIEW_INBOX_PORT="7798")
+for proj, sid in (("game", "pa"), ("site", "pb")):
+    pdir = os.path.join(home, "work", proj)
+    os.makedirs(pdir)
+    subprocess.run([sys.executable, CLI, "--session", sid, "add", "--title", f"From {proj}"], env={**base_env, "CLAUDE_PROJECT_DIR": pdir},
+                   capture_output=True, cwd=pdir)
+shared = os.path.join(home, ".review-inbox")
+srv = subprocess.Popen([sys.executable, CLI, "serve"], env=base_env, stdout=subprocess.DEVNULL)
+try:
+    for _ in range(50):
+        try:
+            both = json.load(urllib.request.urlopen("http://127.0.0.1:7798/api/review", timeout=1))
+            break
+        except OSError:
+            time.sleep(0.1)
+finally:
+    srv.terminate()
+assert {(i["title"], i["project"], i["sid"]) for i in both} == {("From game", "game", "pa"), ("From site", "site", "pb")}, both
+assert all(os.path.normcase(i["project_dir"]) == os.path.normcase(os.path.join(home, "work", i["project"])) for i in both)
+site = next(i for i in both if i["project"] == "site")
+subprocess.run([sys.executable, CLI, "--dir", shared, "dismiss", site["id"], "already fine"], env=base_env, capture_output=True)
+said = lambda sid: subprocess.run([sys.executable, CLI, "hook"], env=base_env, capture_output=True, text=True,
+                                  input=json.dumps({"session_id": sid, "hook_event_name": "UserPromptSubmit"})).stdout
+assert said("pa") == "" and "From site" in said("pb")
+
 print("selfcheck ok")

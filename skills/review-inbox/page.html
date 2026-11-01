@@ -61,6 +61,8 @@
   .acts .msg { color:var(--redo); font-size:12.5px; }
   .chip.qchip { background:var(--link); border-color:var(--link); color:#04121b; }
   .chip.s-answered { color:var(--link); border-color:var(--link); }
+  button.chip.pchip { cursor:pointer; font:inherit; font-size:11.5px; font-weight:600; } button.chip.pchip:hover { color:var(--text); }
+  header .sub button { font:inherit; color:var(--link); background:none; border:0; padding:0; cursor:pointer; }
   .acts .b-dis { background:transparent; color:var(--dim); border-color:var(--line); }
   .acts .spacer { flex:1; }
   .empty { text-align:center; color:var(--dim); margin:18vh 0; font-size:15px; }
@@ -90,12 +92,12 @@
 <script>
 const TABS = { open: "Open", answered: "Answered" };
 const PAGE = 20;  // a long Answered history with hundreds of clips froze the page when drawn all at once
-let tab = "open", data = [], limit = PAGE, seen = null;
+let tab = "open", data = [], limit = PAGE, seen = null, proj = null;  // proj: show one project's items (click its badge)
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 // escape, then turn http(s) URLs into links (trailing punctuation stays text)
 const linkify = s => esc(s).replace(/https?:\/\/[^\s<>"]*[^\s<>".,;:!?)\]']/g, u => `<a href="${u}" target="_blank">${u}</a>`);
 const match = (i, k) => (k === "open") === (i.status === "open");
-const show = i => match(i, tab);
+const show = i => match(i, tab) && (!proj || i.project === proj);
 
 function media(i) {
   const base = `/media/${encodeURIComponent(i.id)}/`;
@@ -120,6 +122,7 @@ function card(i) {
   return `<div class="card ${esc(i.status)}${i.waiting ? " waiting" : ""}" data-id="${esc(i.id)}">
     <div class="head">${q ? `<span class="chip qchip">Question</span>` : ""}<span class="title">${linkify(i.title)}</span>
       <span class="chip wbadge">agent waiting</span>${label ? `<span class="chip s-${esc(i.status)}">${label}</span>` : ""}
+      ${i.project ? `<button class="chip pchip" data-proj="${esc(i.project)}" title="${esc(i.project_dir)}">${esc(i.project)}</button>` : ""}
       ${i.topic ? `<span class="chip">${esc(i.topic)}</span>` : ""}
       <span class="meta">${i.by ? esc(i.by) + "&ensp;" : ""}${esc(i.created)}</span></div>
     ${i.how ? `<div class="how">${linkify(i.how)}</div>` : ""}
@@ -166,9 +169,10 @@ function render() { flip(draw); }
 
 function draw() {
   document.getElementById("tabs").innerHTML = Object.entries(TABS).map(([k, v]) =>
-    `<button class="${k === tab ? "on" : ""}" data-tab="${k}">${v}<span class="n">${data.filter(i => match(i, k)).length}</span></button>`).join("");
+    `<button class="${k === tab ? "on" : ""}" data-tab="${k}">${v}<span class="n">${data.filter(i => match(i, k) && (!proj || i.project === proj)).length}</span></button>`).join("");
   const open = data.filter(i => i.status === "open").length, w = data.filter(i => i.waiting).length;
   document.getElementById("sub").textContent = open ? `${open} waiting on you` + (w ? `, ${w} agent${w > 1 ? "s" : ""} on hold` : "") : "All caught up";
+  if (proj) document.getElementById("sub").insertAdjacentHTML("beforeend", `<br>Only ${esc(proj)}. <button data-allproj>Show every project</button>`);
   // Keyed: unchanged cards keep their DOM node, so loaded media doesn't re-layout and shove the page around,
   // playing clips keep playing, and dismissing a card just lets the ones below move up.
   // Never detach a card that stays: moving a node drops fullscreen and the browser's scroll anchor.
@@ -250,6 +254,7 @@ async function load() {
 document.addEventListener("click", async e => {
   const t = e.target.closest("button") || e.target;  // tabs and option rows have nested spans
   if (t.id === "more") { limit += PAGE; return render(); }
+  if (t.dataset.proj !== undefined || t.dataset.allproj !== undefined) { proj = t.dataset.proj ?? null; limit = PAGE; return render(); }
   if (t.classList.contains("opt")) {
     const c = t.closest(".card"), v = t.dataset.opt;
     c.querySelector(".msg").textContent = "";

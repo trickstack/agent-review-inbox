@@ -16,13 +16,13 @@
     review.py serve                 the review page (also started on demand by `add`)
     review.py hook                  Claude Code hook (SessionStart, UserPromptSubmit, Stop): hands a session its verdicts
 
-Storage: one folder per item in <project>/.review-inbox/<id>/ (item.json + media), so parallel sessions never write the
-same file. Status: open -> ok | redo | dismissed, or open -> answered for a question (`ask`).
+Storage: one inbox per user, ~/.review-inbox/<id>/ (item.json + media): every project's agents post to the same page, and
+each item names its project. One folder per item, so parallel sessions never write the same file. Status: open -> ok | redo | dismissed, or open -> answered for a question (`ask`).
 Items remember the posting session (CLAUDE_CODE_SESSION_ID in Claude Code; --session or REVIEW_INBOX_SESSION elsewhere,
 which the SessionStart hook hands the agent); the hook hands that session its verdicts, with the next
 prompt or by blocking the end of a turn until it has read and acted on them.
 
-Environment: REVIEW_INBOX_DIR (default <project>/.review-inbox; --dir overrides it), REVIEW_INBOX_PORT (7700),
+Environment: REVIEW_INBOX_DIR (default ~/.review-inbox; --dir overrides it), REVIEW_INBOX_PORT (7700),
 REVIEW_INBOX_HOST (127.0.0.1), REVIEW_INBOX_SESSION, REVIEW_INBOX_BY, REVIEW_INBOX_AVF_INPUT (macOS capture device),
 REVIEW_INBOX_BEAT_S (5: how often `wait` polls),
 Steps (--do "a; b; c", or --script <file> with one per line): click <target>, dblclick <target>, move <target>,
@@ -50,15 +50,20 @@ IMAGE_EXT = {"image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image
 
 
 def inbox_dir():
-    if os.environ.get("REVIEW_INBOX_DIR"):
-        return os.path.abspath(os.environ["REVIEW_INBOX_DIR"])
+    """One inbox per user, the same for the hooks and the CLI wherever they run. REVIEW_INBOX_DIR moves it (a project
+    can keep its own by pointing this at <project>/.review-inbox, with its own REVIEW_INBOX_PORT)."""
+    return os.path.abspath(os.environ.get("REVIEW_INBOX_DIR") or os.path.join(os.path.expanduser("~"), ".review-inbox"))
+
+
+def project_dir():
+    """The project an item comes from, only to label it: the agent's project, else the git root, else the cwd."""
     root = os.environ.get("CLAUDE_PROJECT_DIR", "")
     if not root:
         try:
             root = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, timeout=5).stdout.strip()
         except (OSError, subprocess.SubprocessError):
             pass
-    return os.path.join(root or os.getcwd(), ".review-inbox")
+    return os.path.normpath(root or os.getcwd())
 
 
 DIR = inbox_dir()
@@ -93,8 +98,10 @@ def add(kind, title, topic="", how="", media=(), by="", options=None):
             name = os.path.basename(os.path.dirname(m)) + "_" + (f"{n}_" if n > 2 else "") + os.path.basename(m)
         shutil.copy2(m, os.path.join(d, name))
         names.append(name)
+    proj = project_dir()
     item = dict(id=os.path.basename(d), kind=kind, title=title, topic=topic, how=how, by=by,
                 sid=SID,  # the poster: `hook` hands the verdict to this session
+                project=os.path.basename(proj) or proj, project_dir=proj,
                 media=names, created=time.strftime("%Y-%m-%d %H:%M"), status="open", note="")
     if options is not None:  # a question's one-click answers, written with the item so the page never sees it without them
         item["options"] = options
@@ -516,7 +523,7 @@ def ensure_server():
     try:
         got = urllib.request.urlopen(PAGE + "api/dir", timeout=1).read().decode()
         if os.path.normcase(got) != os.path.normcase(DIR):
-            print(f"note: port {PORT} serves another project's inbox ({got}); set REVIEW_INBOX_PORT to give this one its own")
+            print(f"note: port {PORT} serves another inbox ({got}), not {DIR}; give one of them its own REVIEW_INBOX_PORT")
         return
     except OSError:
         pass
@@ -636,7 +643,7 @@ def hook():
     ev = json.load(sys.stdin)
     sid, name = ev.get("session_id", ""), ev.get("hook_event_name")
     if name == "SessionStart":
-        print(f"This project has a review inbox ({PAGE}). When you finish something a human has to judge by eye, ear or feel "
+        print(f"You have a review inbox ({PAGE}). When you finish something a human has to judge by eye, ear or feel "
               f"(UI, visuals, animation, motion, sound, copy), post it there instead of asking in chat: see the review-inbox skill. CLI (use exactly this, it carries your session): {cli(sid)}"
               + (" (in PowerShell, put `& ` in front)" if os.name == "nt" else ""))
         try:  # only in a project that already uses the inbox: every other session hears nothing about capture tools
@@ -920,5 +927,5 @@ if __name__ == "__main__":
         for i in items():
             if (args.open and i["status"] != "open") or (args.topic and i["topic"] != args.topic):
                 continue
-            print(f"{i['status']:9} {i['kind']:6} {i['id']}  [{i['topic']}] {i['title']}" + (f"\n          note: {i['note']}" if i["note"] else "")
+            print(f"{i['status']:9} {i['kind']:6} {i['id']}  {i.get('project', '')}{'/' + i['topic'] if i['topic'] else ''}: {i['title']}" + (f"\n          note: {i['note']}" if i["note"] else "")
                   + reply_paths(i).replace("\n", "\n          "))
