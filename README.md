@@ -99,12 +99,12 @@ SessionStart hook tells the agent too:
 
 | Tool | For | Install |
 |---|---|---|
-| ffmpeg | screen and window recording, contact sheets, `frames` | `winget install Gyan.FFmpeg` (or ffmpeg.exe from the [gyan.dev essentials zip](https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip) in `~/.local/bin`), `brew install ffmpeg`, `sudo apt install ffmpeg` |
+| ffmpeg | contact sheets, `frames`, mp4 from page clips, and screen recording if you turn it on | `winget install Gyan.FFmpeg` (or ffmpeg.exe from the [gyan.dev essentials zip](https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip) in `~/.local/bin`), `brew install ffmpeg`, `sudo apt install ffmpeg` |
 | Playwright | clips, stills and scripted steps on web pages | `python -m pip install playwright`, then `python -m playwright install chromium` |
-| pyautogui | scripted steps on desktop apps | `python -m pip install pyautogui` |
+| pyautogui | scripted steps on desktop apps (only with `REVIEW_INBOX_DESKTOP=1`) | `python -m pip install pyautogui` |
 
-macOS needs Screen Recording (and, for desktop steps, Accessibility) permission for your terminal or agent app. On Linux,
-screen recording and desktop steps need an X11 session; Wayland isn't supported.
+Only if you turn on desktop capture: macOS needs Screen Recording (and, for desktop steps, Accessibility) permission for
+your terminal or agent app, and on Linux it needs an X11 session (Wayland isn't supported).
 
 ## Use
 
@@ -114,14 +114,23 @@ projects: each card shows which project it came from, and clicking that badge sh
 
 Questions land there too. When an agent needs you to decide something, it posts the question with `review.py ask`, optionally with one-click options, instead of asking in a chat you might never look at. The Stop hook catches a turn that ends on a question asked in chat.
 
+Clips are rendered, not filmed off your screen, so you can keep watching something fullscreen while agents work:
+
+1. **A web page or browser game:** `review.py clip --url`, in a headless browser.
+2. **A game engine or native app:** its own recorder, through `REVIEW_INBOX_CLIP_CMD` (see [Your own recorder](#your-own-recorder)).
+3. **Anything the agent rendered itself** (an offline render, a still from its own tool): `review.py add --media`.
+
+Recording your real screen or a window, and steps that drive your real mouse and keyboard, are off unless you set
+`REVIEW_INBOX_DESKTOP=1`. Only one recording runs at a time; a second session waits for the first to finish.
+
 The CLI, which you can run yourself too:
 
 | Command | What it does |
 |---|---|
 | `review.py add --title ... --how ... --media ...` | post an item for review |
 | `review.py clip 6 --url <page>` | record a page for 6 s (Playwright), draft `clip.mp4` + contact sheet |
-| `review.py clip 6 [--window "Title"]` | record the screen or a window (ffmpeg) |
-| `review.py clip --url <page> --do "click text=Save; type hi"` | film an interaction: steps on a page, or `x,y` steps in a `--window` |
+| `review.py clip 6 [--window "Title"]` | record the screen or a window (ffmpeg; needs `REVIEW_INBOX_DESKTOP=1`) |
+| `review.py clip --url <page> --do "click text=Save; type hi"` | film an interaction: steps on a page (or `x,y` steps in a `--window`, with desktop capture on) |
 | `review.py shot --url ... / --window "Title"` | still of a page, a window or the screen |
 | `review.py frames <clip.mp4> --at 2.4` | every frame around a moment, tiled: for flashes the 3 fps contact sheet misses |
 | `review.py doctor` | which optional capture tools are missing, and the install commands |
@@ -130,9 +139,6 @@ The CLI, which you can run yourself too:
 | `review.py list [--open]` | items and verdicts |
 | `review.py handled / revoke / dismiss` | close the loop on a verdict, take a wrong take down, close an item nobody needs to answer |
 | `review.py serve` | the page |
-
-Items live in `~/.review-inbox/<id>/`, one folder each, so parallel sessions never write the same file. Each item records
-its project and the session that posted it, so verdicts go back to the right agent.
 
 ### Your own recorder
 
@@ -152,6 +158,8 @@ export REVIEW_INBOX_CLIP_CMD='my-recorder --last {seconds} --out "{out}"'
 | `REVIEW_INBOX_HOST` | `127.0.0.1` | set `0.0.0.0` to review from your phone over a VPN; there is no auth |
 | `REVIEW_INBOX_WARM_MIN` | `50` | `wait` stops after this many idle minutes, minus 5 (sized for a one-hour prompt cache) |
 | `REVIEW_INBOX_CLIP_CMD` | | custom capture command |
+| `REVIEW_INBOX_DESKTOP` | | `1` allows screen and window recording and desktop steps (they take over your screen and mouse) |
+| `REVIEW_INBOX_KEEP_DAYS` | `7` | answered items lose their videos and images after this many days; `0` keeps everything |
 | `REVIEW_INBOX_NO_TOAST` | | no desktop notifications |
 | `REVIEW_INBOX_NO_SERVER` | | `add` doesn't start the page server (run `review.py serve` yourself) |
 | `REVIEW_INBOX_SESSION` | | the session id for agents without `CLAUDE_CODE_SESSION_ID` (same as `--session`) |
@@ -160,6 +168,14 @@ export REVIEW_INBOX_CLIP_CMD='my-recorder --last {seconds} --out "{out}"'
 | `REVIEW_INBOX_AVF_INPUT` | `1:none` | macOS: the avfoundation device to record |
 
 Notifications: Windows toast (click opens the page), macOS Notification Center, Linux `notify-send`, otherwise none.
+
+### Storage
+
+Items live in `~/.review-inbox/<id>/`, one folder each, so parallel sessions never write the same file. Each item records
+its project and the session that posted it, so verdicts go back to the right agent.
+
+Answered items keep their text, but their videos and images are deleted after 7 days. Set `REVIEW_INBOX_KEEP_DAYS` to
+change it, or `0` to keep everything. Items still waiting on you are never touched.
 
 ## Demo
 

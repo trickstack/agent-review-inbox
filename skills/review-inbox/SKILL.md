@@ -13,12 +13,14 @@ skill's directory. The SessionStart hook prints the full command line: use exact
 
 ## The loop
 
-1. **Capture.** Show it, don't describe it: anything that moves or makes sound gets a video.
-   - A web page or browser game: `review.py clip 6 --url http://localhost:8080/` (Playwright) or `review.py shot --url ...` for a still.
-   - A desktop window or game: `review.py clip 6 --window "<window title>"` (Windows) or `review.py clip 6` (whole screen).
-   - Any other recorder (an engine's capture, a replay buffer): the project sets `REVIEW_INBOX_CLIP_CMD`, and `clip` runs it.
-   - Your own renders or screenshots work too: anything you can pass to `--media`.
+1. **Capture.** Show it, don't describe it: anything that moves or makes sound gets a video. Render it to a file; don't
+   film the human's screen, they may be watching something on it.
+   - A web page or browser game: `review.py clip 6 --url http://localhost:8080/` (headless) or `review.py shot --url ...` for a still.
+   - A game engine or native app: its own recorder, which the project sets as `REVIEW_INBOX_CLIP_CMD`; `clip` runs it.
+   - Anything you rendered yourself (an offline render, a still from your own tool): pass it to `--media`.
    - An interaction (a button press, typing, a hover): add steps and `clip` films them; see below.
+   - Recording the real screen or a window (`clip --window "<title>"`, `clip` with no `--url`) only works when the human
+     has set `REVIEW_INBOX_DESKTOP=1`; otherwise it refuses. Only one recording runs at a time: a second one waits.
 2. **Inspect before you post, every time.** Read the contact sheet (`clip_sheet.jpg`) or the still, and check it really shows
    what you are about to claim: the moment is in frame, the right thing changed, nothing is broken, it isn't black. If not,
    retake it. The human should only ever see footage you have already checked.
@@ -55,7 +57,7 @@ Steps: `click <target>`, `dblclick <target>`, `move <target>`, `type <text>`, `k
 
 - **Web page:** targets are Playwright selectors. A cursor dot is drawn so the viewer sees what was clicked.
   `review.py clip --url http://localhost:8080/ --do "click text=Settings; click #volume; key ArrowRight; wait 500"`
-- **Desktop app:** targets are `x,y` pixels. Take a still first, Read it and pick the coordinates from it:
+- **Desktop app** (only with `REVIEW_INBOX_DESKTOP=1`): targets are `x,y` pixels. Take a still first, Read it and pick the coordinates from it:
   `review.py shot --window "My App"` and then
   `review.py clip --window "My App" --do "click 320,180; type hello; click 40,386; wait 800"`.
   Coordinates are relative to the window's top-left as in that still (Windows; elsewhere use the whole screen's).
@@ -81,5 +83,6 @@ pushes back once if your turn ends on a question with nothing posted.
 - `review.py revoke <id>`: take down your own unanswered item (posted the wrong take). Then post the right one.
 - `review.py dismiss <id> "<why>"`: close an open item that no longer needs an answer (superseded, already fixed).
 
-The inbox lives in `~/.review-inbox`, outside your project. If a project keeps its own (`REVIEW_INBOX_DIR` pointing inside
+The inbox lives in `~/.review-inbox`, outside your project. Answered items lose their media after 7 days
+(`REVIEW_INBOX_KEEP_DAYS`), so attach nothing you need to keep. If a project keeps its own (`REVIEW_INBOX_DIR` pointing inside
 it), that folder git-ignores itself, so it never lands in a commit.

@@ -2,7 +2,7 @@
 
     review.py add --title "Ball trail" --how "Open the game, watch the ball" [--topic juice] [--media a.png b.mp4]
     review.py clip 6 --url http://localhost:8080/   record a page for 6 s (Playwright) -> draft clip.mp4 + clip_sheet.jpg
-    review.py clip 6 [--window "My Game"]           record the screen / a window for 6 s (ffmpeg)
+    review.py clip 6 [--window "My Game"]           record the screen / a window for 6 s (ffmpeg; only with REVIEW_INBOX_DESKTOP=1)
     review.py clip --url ... --do "click text=Save; type hi; key Enter"   film an interaction (steps below)
     review.py shot [--url ... | --window "My Game"] still of a page (Playwright) or a window / the screen -> draft shot.png
     review.py frames clip.mp4 --at 2.4   every frame around a moment, tiled (a 3 fps sheet misses flashes under ~0.3 s)
@@ -29,10 +29,11 @@ REVIEW_INBOX_BEAT_S (5: how often `wait` polls),
 Steps (--do "a; b; c", or --script <file> with one per line): click <target>, dblclick <target>, move <target>,
 type <text>, key <combo>, scroll <dy>, wait <ms>. A target is a Playwright selector on a page (text=Save, #email) or x,y:
 on a page in viewport pixels, on the desktop relative to the --window's top-left (pick them from `shot --window`), else
-the screen. Desktop steps need pyautogui; the cursor glides to each target so the viewer sees what was clicked.
+the screen. Desktop steps need pyautogui and REVIEW_INBOX_DESKTOP=1; the cursor glides to each target so the viewer sees what was clicked.
 
 REVIEW_INBOX_WARM_MIN (50: `wait` gives up this many idle minutes minus 5, sized for a one-hour prompt cache), REVIEW_INBOX_CLIP_CMD (custom capture
-command, {out} and {seconds} are filled in), REVIEW_INBOX_NO_TOAST, REVIEW_INBOX_NO_SERVER.
+command, {out} and {seconds} are filled in), REVIEW_INBOX_NO_TOAST, REVIEW_INBOX_NO_SERVER, REVIEW_INBOX_DESKTOP (1: allow screen/window capture and desktop steps),
+REVIEW_INBOX_KEEP_DAYS (7: answered items lose their media after this many days; 0 keeps everything).
 """
 import argparse, base64, binascii, glob, http.server, json, os, re, shutil, subprocess, sys, time
 from datetime import datetime
@@ -59,6 +60,12 @@ BEAT_S = float(os.environ.get("REVIEW_INBOX_BEAT_S") or 5)  # `wait` polls and t
 STATUSES = ("open", "ok", "redo", "dismissed", "answered")
 ANSWERS = {"review": ("ok", "redo", "dismissed"), "question": ("answered", "dismissed")}  # what the human can set, per kind
 MAX_BODY = 32 << 20  # a POST from the page: a note plus a few pasted screenshots
+DESKTOP = os.environ.get("REVIEW_INBOX_DESKTOP") == "1"  # screen/window capture and desktop steps: opt-in, they take over the screen
+KEEP_DAYS = float(os.environ.get("REVIEW_INBOX_KEEP_DAYS") or 7)  # answered items lose their media after this; 0 keeps everything
+LOCK_WAIT_S = 360  # a second recording waits this long for the first (the longest clip with steps is 300 s)
+NO_DESKTOP = ("Screen and window capture is off: it films your real screen, and steps drive your real mouse and keyboard. "
+              "Film a page headless with --url, let your engine record (REVIEW_INBOX_CLIP_CMD), or post a video you rendered "
+              "with `add --media`. To allow it, set REVIEW_INBOX_DESKTOP=1.")
 IMAGE_EXT = {"image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp"}
 
 
@@ -411,6 +418,8 @@ def clip(out_dir, seconds, url="", window="", steps=()):
     mp4 = os.path.join(out_dir, "clip.mp4")
     if window and os.name != "nt" and not url:
         raise SystemExit("--window works on Windows only; leave it out to record the whole screen")
+    if not url and not (os.environ.get("REVIEW_INBOX_CLIP_CMD") and not steps) and not DESKTOP:
+        raise SystemExit(NO_DESKTOP)
     if os.environ.get("REVIEW_INBOX_CLIP_CMD") and not steps:  # any recorder you like: a replay buffer, an engine's own capture
         subprocess.run(os.environ["REVIEW_INBOX_CLIP_CMD"].format(out=mp4, seconds=seconds), shell=True)
     elif url:
@@ -460,6 +469,8 @@ def duration(mp4):
 def shot(png, url="", window="", steps=()):
     if window and os.name != "nt" and not url:
         raise SystemExit("--window works on Windows only; leave it out for the whole screen")
+    if not url and not DESKTOP:
+        raise SystemExit(NO_DESKTOP)
     if url:
         return playwright_page(url, lambda page: (page.wait_for_timeout(1000), web_steps(page, steps),
                                                   page.wait_for_timeout(300), page.screenshot(path=png)))
@@ -499,9 +510,9 @@ def doctor():
             else os.path.join(os.environ.get("LOCALAPPDATA", ""), "ms-playwright"))
         if not glob.glob(os.path.join(home, "chromium*")):
             out.append(("Playwright's Chromium", "clips and stills of web pages", f"{PY} -m playwright install chromium"))
-    if not has("pyautogui"):
+    if DESKTOP and not has("pyautogui"):
         out.append(("pyautogui", "scripted steps (--do) on desktop apps", f"{pip} pyautogui"))
-    if mac:
+    if DESKTOP and mac:
         try:
             import ctypes, ctypes.util
             cg = ctypes.cdll.LoadLibrary(ctypes.util.find_library("CoreGraphics"))
@@ -514,16 +525,119 @@ def doctor():
                             "System Settings > Privacy & Security > Accessibility: allow your terminal / agent app"))
         except (OSError, AttributeError):
             pass
-    if linux and (os.environ.get("XDG_SESSION_TYPE") == "wayland" or os.environ.get("WAYLAND_DISPLAY")):
+    if DESKTOP and linux and (os.environ.get("XDG_SESSION_TYPE") == "wayland" or os.environ.get("WAYLAND_DISPLAY")):
         out.append(("an X11 session", "screen recording and desktop steps (x11grab and pyautogui need X11; Wayland is not supported)",
                     "log in to an X11 / Xorg session, or film web pages with --url"))
     return out
 
 
+def pid_alive(pid):
+    if pid <= 0:
+        return False
+    if os.name == "nt":  # os.kill(pid, 0) would terminate it on Windows
+        import ctypes, ctypes.wintypes as wt
+        k = ctypes.windll.kernel32
+        h = k.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+        if not h:
+            return ctypes.GetLastError() == 5  # access denied: it exists
+        code = wt.DWORD()
+        k.GetExitCodeProcess(h, ctypes.byref(code))
+        k.CloseHandle(h)
+        return code.value == 259  # STILL_ACTIVE
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
+class recording_lock:
+    """One recording at a time across every session: two would fight over the screen, the mouse and the CPU. A lock file
+    holds the recorder's pid; a dead pid (or a lock older than any recording can be) is taken over."""
+    path = property(lambda self: os.path.join(DIR, ".recording.lock"))
+
+    def __enter__(self):
+        os.makedirs(DIR, exist_ok=True)
+        start, told = time.time(), False
+        while True:
+            try:
+                fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                os.write(fd, str(os.getpid()).encode())
+                os.close(fd)
+                return self
+            except FileExistsError:
+                pass
+            try:
+                with open(self.path) as f:
+                    pid = int(f.read() or 0)
+                age = time.time() - os.path.getmtime(self.path)
+            except (OSError, ValueError):
+                continue  # gone, or being written this instant
+            if (pid and not pid_alive(pid)) or age > LOCK_WAIT_S + 60 or (not pid and age > 5):
+                try:
+                    os.remove(self.path)
+                except OSError:
+                    pass
+                continue
+            if time.time() - start > LOCK_WAIT_S:
+                raise SystemExit(f"another session's recording (pid {pid}) is still running after {LOCK_WAIT_S} s; try again later")
+            if not told:
+                print(f"Another session is recording (pid {pid}); waiting for it to finish...", flush=True)
+                told = True
+            time.sleep(0.5)
+
+    def __exit__(self, *exc):
+        try:
+            os.remove(self.path)
+        except OSError:
+            pass
+
+
+KEPT = {"item.json", "delivered", "handled", "gaveup", "waiting.json"}  # an item's text and its loop marks
+
+
+def prune(force=False):
+    """Answered items older than KEEP_DAYS lose their media (clips, stills, sheets, pasted images) but keep their text and
+    verdict; old drafts go entirely. Open items are never touched. At most once a day unless forced."""
+    if KEEP_DAYS <= 0 or not os.path.isdir(DIR):
+        return
+    stamp = os.path.join(DIR, ".pruned")
+    if not force and os.path.exists(stamp) and time.time() - os.path.getmtime(stamp) < 86400:
+        return
+    open(stamp, "w").close()
+    cutoff = time.time() - KEEP_DAYS * 86400
+    for i in items():
+        try:
+            if not i.get("answered") or i.get("pruned") or time.mktime(time.strptime(i["answered"], "%Y-%m-%d %H:%M:%S")) > cutoff:
+                continue
+        except ValueError:
+            continue
+        d = os.path.join(DIR, i["id"])
+        for f in os.listdir(d):
+            if f not in KEPT:
+                try:
+                    os.remove(os.path.join(d, f))
+                except OSError:
+                    pass
+        i["pruned"] = time.strftime("%Y-%m-%d")
+        save(i)
+    for d in glob.glob(os.path.join(DIR, "_drafts", "*")):
+        if os.path.getmtime(d) < cutoff:
+            shutil.rmtree(d, ignore_errors=True)
+
+
 def draft_dir():
-    d = os.path.join(DIR, "_drafts", time.strftime("%Y%m%d-%H%M%S"))  # no item.json, so never listed; nothing is posted
-    os.makedirs(d)
-    return d
+    base = os.path.join(DIR, "_drafts", time.strftime("%Y%m%d-%H%M%S"))  # no item.json, so never listed; nothing is posted
+    d, n = base, 1
+    while True:  # two captures in one second (two sessions, or a quick retry)
+        try:
+            os.makedirs(d)
+            return d
+        except FileExistsError:
+            n += 1
+            d = f"{base}-{n}"
 
 
 # ---------------------------------------------------------------- telling the human
@@ -590,6 +704,14 @@ def verdict(item):
         return f"ANSWER to your question \"{item['title']}\" ({item['id']}): {item['note'] or '(no text)'}" + reply_paths(item)
     return (f"ANSWERED {item['status'].upper()}: {item['title']} ({item['id']})" + (f"\nnote: {item['note']}" if item["note"] else "")
             + reply_paths(item))
+
+
+def id_time(item_id):
+    """When an item was posted, from its id (YYYYmmdd-HHMMSS-...), as epoch seconds."""
+    try:
+        return time.mktime(time.strptime(item_id[:15], "%Y%m%d-%H%M%S"))
+    except ValueError:
+        return float("inf")
 
 
 def answer_key(item):
@@ -694,11 +816,22 @@ def hook():
         if missing:
             print("Review inbox capture tools missing (offer to install them): " + "; ".join(
                 f"{w} (disables {d}): {f}" for w, d, f in missing) + f". Details: {cli(sid)} doctor")
+        try:
+            prune()
+        except OSError:
+            pass
         return
     stop = name == "Stop"
-    if name == "UserPromptSubmit":  # a reply in the chat overtakes this session's open questions; reviews stay open
+    if name == "UserPromptSubmit" and sid:
+        # a reply in the chat overtakes the questions this session asked since the human's previous message; older open
+        # questions stay up for an answer in the inbox, and reviews always do
+        seen = os.path.join(DIR, ".prompt-" + re.sub(r"[^A-Za-z0-9_-]", "", sid))
+        # ids have whole seconds; a session's first prompt seen closes nothing (whatever it asked before is older than that)
+        since = int(os.path.getmtime(seen)) if os.path.exists(seen) else float("inf")
+        os.makedirs(DIR, exist_ok=True)
+        open(seen, "w").close()
         for i in mine(sid):
-            if i.get("kind") == "question" and not i.get("answered"):
+            if i.get("kind") == "question" and not i.get("answered") and id_time(i["id"]) >= since:
                 done = answer(i["id"], "answered", "answered in the chat: " + (ev.get("prompt") or "")[:300])
                 mark(i["id"], "delivered", answer_key(done))  # it isn't news to the agent: don't hand it back as a verdict
     found = undelivered(sid)
@@ -834,7 +967,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             from urllib.parse import unquote
             item_id, name = unquote(m[1]), unquote(m[2])
             item = next((i for i in items() if i["id"] == item_id), None)  # only an item's own files, never a path
-            if item and name in item["media"] + item.get("reply", []):
+            if item and name in item["media"] + item.get("reply", []) and os.path.isfile(os.path.join(DIR, item_id, name)):
                 return self.send_file(os.path.join(DIR, item_id, name))
         self.send_error(404)
 
@@ -859,6 +992,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 def serve():
     os.makedirs(DIR, exist_ok=True)
+    prune()
     print(f"Review inbox for {DIR} on http://{HOST}:{PORT}/")
     http.server.ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
 
@@ -925,7 +1059,13 @@ if __name__ == "__main__":
         if not args.seconds and not steps:
             sys.exit("give a length in seconds, or steps (--do / --script)")
         d = draft_dir()
-        media = clip(d, args.seconds, args.url, args.window, steps)
+        try:
+            with recording_lock():
+                media = clip(d, args.seconds, args.url, args.window, steps)
+        except SystemExit:
+            if not os.listdir(d):  # a refused capture leaves no empty draft
+                os.rmdir(d)
+            raise
         if not media:
             sys.exit(f"no clip was made; `{cli(SID)} doctor` lists missing capture tools")
         print("made:", ", ".join(shown(os.path.join(d, m)) for m in media))
@@ -949,7 +1089,13 @@ if __name__ == "__main__":
     elif args.cmd == "shot":
         d = draft_dir()
         png = os.path.join(d, "shot.png")
-        shot(png, args.url, args.window, steps)
+        try:
+            with recording_lock():
+                shot(png, args.url, args.window, steps)
+        except SystemExit:
+            if not os.listdir(d):
+                os.rmdir(d)
+            raise
         if not os.path.exists(png):
             sys.exit("no still was made")
         print(f"Read {shown(png)} first; if it shows what you claim, post with --media {shown(png)}")

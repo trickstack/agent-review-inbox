@@ -100,6 +100,7 @@ const match = (i, k) => (k === "open") === (i.status === "open");
 const show = i => match(i, tab) && (!proj || i.project === proj);
 
 function media(i) {
+  if (i.pruned) return `<div class="files">Media deleted ${esc(i.pruned)}, after the retention period. The verdict stays.</div>`;
   const base = `/media/${encodeURIComponent(i.id)}/`;
   // contact sheets (sheet.jpg, clip_sheet.jpg) are for agents to read; only stills an agent attached on purpose are shown
   const shown = i.media.filter(m => /\.(png|jpe?g|gif|webp|mp4|webm|wav|mp3|ogg)$/i.test(m) && !/sheet\.jpg$/i.test(m));

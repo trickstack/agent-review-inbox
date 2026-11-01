@@ -123,12 +123,22 @@ review.answer(qi["id"], "answered", "Blue")
 got, _ = qw.communicate(timeout=10)
 assert qw.returncode == 0 and 'ANSWER to your question "Red or blue paddle?"' in got and "Blue" in got, got
 # answered in the chat instead: the next prompt closes the session's open questions (not its reviews), without a verdict
+def prompt(sid, text):
+    return subprocess.run([sys.executable, CLI, "hook"], env=env, capture_output=True, text=True,
+                          input=json.dumps({"session_id": sid, "hook_event_name": "UserPromptSubmit", "prompt": text})).stdout
+
+
+subprocess.run([sys.executable, CLI, "--session", "q3", "ask", "Asked before any prompt?"], env=env, capture_output=True)
+prompt("q3", "hi")  # the session's first prompt seen: closes nothing, so that question stays up for the inbox
+time.sleep(1.1)
 subprocess.run([sys.executable, CLI, "--session", "q3", "ask", "Bigger ball?"], env=env, capture_output=True)
 subprocess.run([sys.executable, CLI, "--session", "q3", "add", "--title", "Paddle glow"], env=env, capture_output=True)
 said = subprocess.run([sys.executable, CLI, "hook"], env=env, capture_output=True, text=True,
                       input=json.dumps({"session_id": "q3", "hook_event_name": "UserPromptSubmit", "prompt": "yes, twice as big"})).stdout
 q3 = {i["title"]: i for i in review.items() if i["sid"] == "q3"}
 assert q3["Bigger ball?"]["note"] == "answered in the chat: yes, twice as big" and not q3["Paddle glow"].get("answered")
+assert not q3["Asked before any prompt?"].get("answered")  # older than the previous prompt: only the inbox answers it
+review.answer(q3["Asked before any prompt?"]["id"], "dismissed", "")
 assert "Bigger ball?" not in said, said
 
 
@@ -144,6 +154,8 @@ def stop_after(text, active=False, sid="q2", transcript=None):
 # a turn that ends on a question asked in chat is pushed back once, never twice; a plain ending is left alone.
 # Only in a session that has used the inbox: a session that never posted is never nagged.
 assert stop_after("Want it brighter, or keep it as is?", sid="fresh") == ""
+prompt("q2", "start")
+time.sleep(1.1)
 subprocess.run([sys.executable, CLI, "--session", "q2", "ask", "Warm-up?"], env=env, capture_output=True)
 subprocess.run([sys.executable, CLI, "hook"], env=env, capture_output=True, text=True,
                input=json.dumps({"session_id": "q2", "hook_event_name": "UserPromptSubmit", "prompt": "sure"}))
@@ -248,5 +260,41 @@ if review.ffmpeg():
     assert r.returncode == 0 and "15 frames" in r.stdout and os.path.getsize(os.path.join(tmp, "frames_1.5s.jpg")) > 0, r
     r = run("frames", mp4, "--at", "9")
     assert r.returncode and r.stderr.strip() == "no frames were made; is --at inside the clip?", r.stderr
+
+# screen and window capture is opt-in: without REVIEW_INBOX_DESKTOP=1 it refuses and names the alternatives
+for cmd in (("clip", "3"), ("shot",), ("clip", "--window", "X", "--do", "click 1,1")):
+    r = run(*cmd)
+    assert r.returncode and "REVIEW_INBOX_DESKTOP=1" in r.stderr and "--url" in r.stderr, (cmd, r.stderr)
+
+# one recording at a time: a second waits for the first, then gives up; a dead holder's lock is taken over
+code = ("import sys; sys.path.insert(0, sys.argv[1]); import review; review.LOCK_WAIT_S = 1.5" + chr(10) +
+        "with review.recording_lock(): print('got it')")
+with review.recording_lock():
+    r = subprocess.run([sys.executable, "-c", code, os.path.dirname(CLI)], env=ENV, capture_output=True, text=True, timeout=30)
+assert r.returncode and "is recording" in r.stdout and "still running" in r.stderr, (r.stdout, r.stderr)
+dead = subprocess.run([sys.executable, "-c", "import os; print(os.getpid())"], capture_output=True, text=True).stdout.strip()
+open(os.path.join(tmp, ".recording.lock"), "w").write(dead)
+r = subprocess.run([sys.executable, "-c", code, os.path.dirname(CLI)], env=ENV, capture_output=True, text=True, timeout=30)
+assert r.returncode == 0 and r.stdout.strip() == "got it" and not os.path.exists(os.path.join(tmp, ".recording.lock")), r
+
+# retention: answered items older than KEEP_DAYS lose their media but keep their text; open and recent ones keep it all
+def aged(title, answered_days_ago):
+    it, d = review.add("review", title, media=[png])
+    if answered_days_ago is not None:
+        it = review.answer(it["id"], "ok", "fine")
+        it["answered"] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time() - answered_days_ago * 86400))
+        review.save(it)
+    return it["id"], d
+old_id, old_d = aged("Old verdict", 8)
+new_id, new_d = aged("Recent verdict", 2)
+open_id, open_d = aged("Still open", None)
+os.utime(os.path.join(open_d, "item.json"), (time.time() - 30 * 86400,) * 2)
+review.prune(force=True)
+gone = review.load(old_id)
+assert sorted(os.listdir(old_d)) == ["item.json"] and gone["pruned"] and gone["note"] == "fine" and gone["status"] == "ok"
+assert "still.png" in os.listdir(new_d) and "still.png" in os.listdir(open_d)
+review.KEEP_DAYS = 0
+review.prune(force=True)
+assert "still.png" in os.listdir(new_d)
 
 print("selfcheck ok")

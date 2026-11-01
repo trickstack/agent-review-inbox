@@ -94,6 +94,12 @@ def round_(r):
     proj = {s: PROJECTS[k % 3] for k, s in enumerate(S)}
     stats["sessions"] += len(S)
 
+    # 0. each session starts with the human's message (a chat reply later closes only what was asked after one)
+    with ThreadPoolExecutor(len(S)) as ex:
+        assert all(v == "" for v in ex.map(lambda s: hook(s, "UserPromptSubmit", prompt="start"), S))
+    stats["hooks"] += len(S)
+    time.sleep(1.1)
+
     # 1. everyone posts at once: 12 x "Ball trail" (two per odd session), a question per even session
     jobs = [(s, ("add", "--title", "Ball trail", "--how", "watch the ball")) for s in S]
     jobs += [(s, ("ask", "Red or blue paddle?", "--options", "Red", "Blue")) if k % 2 == 0 else
@@ -245,6 +251,21 @@ def round_(r):
             assert disk[Q[s]]["status"] == "answered" and disk[Q[s]]["note"] == f"answered in the chat: chat {s}"
         if k in (0, 4):
             assert disk[R[s]]["status"] == "open" and disk[Q[s]]["note"] == notes[Q[s]]
+
+    # 6b. a question older than the session's previous prompt stays up for the inbox; a newer one is closed by the reply
+    old_s, p = f"r{r}-old-{tag}", PROJECTS[0]
+    assert cli(old_s, p, "ask", "Asked before any prompt?").returncode == 0
+    old = next(i for i, v in folder_items().items() if v["sid"] == old_s)
+    time.sleep(1.1)  # ids have whole seconds: a prompt in the question's own second counts it as asked after the prompt
+    assert hook(old_s, "UserPromptSubmit", prompt="first") == ""  # its first prompt seen: closes nothing
+    time.sleep(1.1)
+    assert cli(old_s, p, "ask", "Asked this turn?").returncode == 0
+    new = next(i for i, v in folder_items().items() if v["sid"] == old_s and i != old)
+    assert hook(old_s, "UserPromptSubmit", prompt="second") == ""
+    disk = folder_items()
+    assert disk[old]["status"] == "open" and disk[new]["note"] == "answered in the chat: second", (disk[old], disk[new])
+    assert cli(old_s, p, "revoke", old).returncode == 0
+    stats["hooks"] += 2
 
     # 7. sessions 0 and 4 take down their open review; then no session in this round owes anything
     for s in (S[0], S[4]):
