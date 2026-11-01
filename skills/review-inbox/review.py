@@ -10,7 +10,7 @@
     review.py ask "Red or blue paddle?" [--options Red Blue]   a question for the human: answered on the page like a verdict
     review.py list [--open] [--topic juice]
     review.py wait [<id>]           (background) exits when the human answers -> wakes the agent; no id = every open item
-                                    this session posted. Gives up (exit 3) before the session's prompt cache goes cold.
+                                    this session posted. Gives up (exit 3) after ~45 idle minutes, before a one-hour prompt cache goes cold.
     review.py handled <id> "<what>" the verdict is dealt with without a new item ("committed abc123", or why you stopped)
     review.py revoke <id>           take your own unanswered item down (e.g. before posting a retake)
     review.py dismiss <id> "<note>" close an open item that no longer needs an answer (superseded, already fixed)
@@ -31,7 +31,7 @@ type <text>, key <combo>, scroll <dy>, wait <ms>. A target is a Playwright selec
 on a page in viewport pixels, on the desktop relative to the --window's top-left (pick them from `shot --window`), else
 the screen. Desktop steps need pyautogui; the cursor glides to each target so the viewer sees what was clicked.
 
-REVIEW_INBOX_WARM_MIN (50: idle minutes before a prompt cache counts as cold), REVIEW_INBOX_CLIP_CMD (custom capture
+REVIEW_INBOX_WARM_MIN (50: `wait` gives up this many idle minutes minus 5, sized for a one-hour prompt cache), REVIEW_INBOX_CLIP_CMD (custom capture
 command, {out} and {seconds} are filled in), REVIEW_INBOX_NO_TOAST, REVIEW_INBOX_NO_SERVER.
 """
 import argparse, base64, binascii, glob, http.server, json, os, re, shutil, subprocess, sys, time
@@ -626,7 +626,7 @@ def last_turn(sid):
 
 def wait(item_id="", sid=None):
     """Block until the human answers item_id, or any of this session's open items without an id (0); revoked (4);
-    nothing to wait on (5); give up while sid's prompt cache is still warm (3), so the answer never wakes a cold cache."""
+    nothing to wait on (5); give up after WARM_MIN - 5 idle minutes (3), while a one-hour prompt cache is still warm. A shorter cache can still go cold."""
     sid = SID if sid is None else sid
     start = time.time()
     ids = [os.path.basename(item_id)] if item_id else [i["id"] for i in mine(sid) if not i.get("answered")]
@@ -654,7 +654,7 @@ def wait(item_id="", sid=None):
             if last and time.time() - last > (WARM_MIN - 5) * 60:
                 for i in got:
                     mark(i["id"], "gaveup")  # the Stop hook won't ask for a re-arm; the answer comes with the next prompt
-                print("No answer yet and this session is about to go cold: stopped waiting. Don't re-arm; the verdict reaches you with your next prompt.")
+                print("No answer yet, and this session has been idle long enough that its prompt cache may go cold: stopped waiting. Don't re-arm; the verdict reaches you with your next prompt.")
                 return 3
             time.sleep(BEAT_S)
     finally:

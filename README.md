@@ -37,9 +37,10 @@ one place and closes the loop:
    itself, and posts it with what to look at.
 2. **Notify.** A desktop notification pops up; clicking it opens the inbox page.
 3. **Verdict.** You watch, then press OK or Redo, with a note and, if you like, a pasted, marked-up screenshot.
-4. **Act.** The agent was waiting in the background, cheaply: `wait` gives up before the session's prompt cache goes cold
-   (it assumes a one-hour cache; with a shorter one, lower `REVIEW_INBOX_WARM_MIN`), so waiting doesn't cost a full
-   context re-read. The verdict arrives with your next prompt instead.
+4. **Act.** The agent waits in the background and wakes the moment you answer. After about 45 idle minutes `wait`
+   stops, and the verdict arrives with your next prompt instead. That limit is sized for a one-hour prompt cache, so a
+   late answer doesn't wake a session whose cache has gone cold. Shorter caches (subagents, some API setups) can still go
+   cold while it waits.
 5. **Stay honest.** The Stop hook won't let the agent end its turn while it has an unread verdict, an unanswered Redo or OK,
    or an open item with nothing waiting for the answer.
 
@@ -149,7 +150,7 @@ export REVIEW_INBOX_CLIP_CMD='my-recorder --last {seconds} --out "{out}"'
 | `REVIEW_INBOX_DIR` | `~/.review-inbox` | where items live; to keep a project's items apart, point it at `<project>/.review-inbox` and give it its own port |
 | `REVIEW_INBOX_PORT` | `7700` | page port |
 | `REVIEW_INBOX_HOST` | `127.0.0.1` | set `0.0.0.0` to review from your phone over a VPN; there is no auth |
-| `REVIEW_INBOX_WARM_MIN` | `50` | idle minutes after which a prompt cache counts as cold |
+| `REVIEW_INBOX_WARM_MIN` | `50` | `wait` stops after this many idle minutes, minus 5 (sized for a one-hour prompt cache) |
 | `REVIEW_INBOX_CLIP_CMD` | | custom capture command |
 | `REVIEW_INBOX_NO_TOAST` | | no desktop notifications |
 | `REVIEW_INBOX_NO_SERVER` | | `add` doesn't start the page server (run `review.py serve` yourself) |

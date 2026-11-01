@@ -32,7 +32,7 @@ skill's directory. The SessionStart hook prints the full command line: use exact
    - Show only what is new. Don't re-post variants the human already decided on.
    - `add` starts the page if it isn't running and pops a desktop notification, so you don't need to alert the human.
 4. **Wait.** Run `review.py wait` as a **background** command (`run_in_background`) and end your turn or keep working.
-   It exits with the verdict when the human answers. It exits 3 before your prompt cache would go cold: then don't re-arm it.
+   It exits with the verdict when the human answers. It exits 3 after about 45 idle minutes (sized for a one-hour prompt cache): then don't re-arm it.
    The verdict reaches you with the next prompt instead.
    - No `run_in_background` in your agent? Start it detached and read its output later: `nohup <cli> wait > wait.log 2>&1 &`
      in bash, or `Start-Process -NoNewWindow -RedirectStandardOutput wait.log <python> "<review.py> ... wait"` in
