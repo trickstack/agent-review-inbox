@@ -40,7 +40,7 @@
   .media { display:flex; flex-wrap:wrap; justify-content:center; align-items:flex-start; gap:10px; margin:10px 0 4px; }
   .media > * { max-width:100%; }
   .media img, .media video { display:block; width:auto; height:auto; max-width:100%; max-height:480px; border-radius:10px; }
-  .media.multi img, .media.multi video { max-height:280px; }
+  .media.multi img, .media.multi video { max-height:280px; max-width:calc(50% - 5px); }
   .media .aud { flex:1 1 100%; display:flex; flex-direction:column; font-size:12px; gap:4px; }
   .files { display:flex; flex-wrap:wrap; gap:12px; margin-bottom:12px; }
   .files a { font-size:12px; color:var(--dim); }
