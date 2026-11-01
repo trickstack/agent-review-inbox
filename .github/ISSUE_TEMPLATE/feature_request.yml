@@ -1,0 +1,17 @@
+name: Feature request
+description: Something the inbox should do
+labels: [enhancement]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What you want
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why
+      description: What you're doing when you miss it
+    validations:
+      required: true

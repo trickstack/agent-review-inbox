@@ -1,0 +1,52 @@
+name: Bug report
+description: Something in the inbox, the hooks or the CLI is broken
+labels: [bug]
+body:
+  - type: input
+    id: os
+    attributes:
+      label: OS
+      placeholder: Windows 11, macOS 15, Ubuntu 24.04 (X11 or Wayland)
+    validations:
+      required: true
+  - type: input
+    id: agent
+    attributes:
+      label: Agent and version
+      description: "`claude --version` or `codex --version`, or the other agent you use"
+      placeholder: Claude Code 2.x / Codex 0.x
+    validations:
+      required: true
+  - type: input
+    id: plugin
+    attributes:
+      label: Plugin version or commit
+      description: The version in `.claude-plugin/plugin.json`, or the commit you installed from
+    validations:
+      required: true
+  - type: textarea
+    id: ran
+    attributes:
+      label: What you ran
+      description: The command, or what you or the agent did on the page
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: happened
+    attributes:
+      label: What happened
+      description: Error output, a screenshot of the page, the hook's message
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: "`review.py doctor` output"
+      render: text

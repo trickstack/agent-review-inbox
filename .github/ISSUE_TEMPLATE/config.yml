@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and help
+    url: https://github.com/trickstack/agent-review-inbox/discussions/categories/q-a
+    about: How do I set it up, why does my agent do X
+  - name: Show what you built / ideas
+    url: https://github.com/trickstack/agent-review-inbox/discussions/categories/show-and-tell
+    about: Your setup, your recorder, ideas worth talking through before an issue
