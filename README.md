@@ -1,14 +1,31 @@
-# agent-review-inbox
+<div align="center">
 
-**A review inbox for agent work that needs a human's eyes.** Your coding agent finishes something you can only judge by
-looking, listening or playing (a UI change, an animation, a particle effect, game feel, a sound), records it, and posts it
-to one page. You answer **OK** or **Redo** with a note. The verdict wakes the agent, and a hook makes sure it acts on it.
+<img src="assets/logo.svg" alt="" width="112">
+
+<h1>agent-review-inbox</h1>
+
+<p><b>A review inbox for agent work that needs a human's eyes.</b></p>
+
+<p>
+  <a href="https://ko-fi.com/trickstack"><img src="https://img.shields.io/badge/Ko--fi-Support%20me-FF5E5B?logo=ko-fi&logoColor=white" alt="Support me on Ko-fi"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license"></a>
+  <a href="#install"><img src="https://img.shields.io/badge/Claude%20Code-plugin-D97757" alt="Claude Code plugin"></a>
+  <a href="docs/codex-test.md"><img src="https://img.shields.io/badge/Codex-untested-lightgrey" alt="Codex (untested)"></a>
+  <a href="https://github.com/trickstack/agent-review-inbox/stargazers"><img src="https://img.shields.io/github/stars/trickstack/agent-review-inbox?style=flat" alt="GitHub stars"></a>
+</p>
+
+<!-- HERO: replace assets/hero.gif with the recorded review loop (~15 s): agent posts, notification pops,
+     Redo with a note, the agent's retake arrives, OK. Keep it under ~10 MB so GitHub plays it inline. -->
+<img src="assets/hero.gif" alt="The review loop: post, notify, Redo with a note, retake, OK" width="820">
+
+</div>
+
+Your coding agent finishes something you can only judge by looking, listening or playing (a UI change, an animation, a
+particle effect, game feel, a sound), records it, and posts it to one page. You answer **OK** or **Redo** with a note.
+The verdict wakes the agent, and a hook makes sure it acts on it.
 
 A plugin for **Claude Code** and **Codex**: one Python file (stdlib only), one HTML page, three hooks and a skill.
 The CLI works with any agent that can run a shell command.
-
-<!-- GIF: the whole loop in ~15 s: agent posts, notification pops, Redo with a note, agent posts the retake -->
-![The loop](docs/media/loop.gif)
 
 ## Why
 
@@ -25,8 +42,23 @@ waiting on you in a different window. The inbox gives that judgement one place a
 5. **Stay honest.** The Stop hook won't let the agent end its turn while it has an unread verdict, an unanswered Redo or OK,
    or an open item with nothing waiting for the answer.
 
-<!-- screenshot: inbox page with an "agent waiting" card glowing -->
-![The inbox page](docs/media/inbox.png)
+## What it looks like
+
+<!-- Replace each placeholder in assets/ with a capture from the demo run (same file name). -->
+
+<table>
+  <tr>
+    <td width="50%"><img src="assets/toast.png" alt="The desktop notification"><br><sub>The agent posts: a notification pops up.</sub></td>
+    <td width="50%"><img src="assets/inbox.png" alt="The inbox page with an item"><br><sub>The inbox page, the agent waiting on the answer.</sub></td>
+  </tr>
+  <tr>
+    <td><img src="assets/redo.gif" alt="Typing a Redo note and pressing Redo"><br><sub>Redo, with a note.</sub></td>
+    <td><img src="assets/retake.png" alt="The agent's retake arriving"><br><sub>The agent picks it up and posts the retake.</sub></td>
+  </tr>
+  <tr>
+    <td colspan="2" align="center"><img src="assets/ok.png" alt="Pressing OK" width="50%"><br><sub>OK, and the agent closes the loop.</sub></td>
+  </tr>
+</table>
 
 ## Install
 
@@ -118,3 +150,5 @@ Built with Claude (Anthropic's Claude Opus 5.5 via Claude Code).
 ## License
 
 [MIT](LICENSE)
+
+If it saved you some time, you can [buy me a coffee](https://ko-fi.com/trickstack).

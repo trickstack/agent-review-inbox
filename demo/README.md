@@ -48,10 +48,16 @@ watch the agent pick the verdict up and post the next take on its own, then **OK
 
 ## Recording the README media
 
-One take of prompt 1 covers the main GIF: post, notification, Redo with a note, retake, OK. Worth capturing:
+One take of prompt 1 covers everything: post, notification, Redo with a note, retake, OK. Save each capture over the
+placeholder of the same name in `assets/`:
 
-- The desktop notification popping up as the agent posts.
-- The inbox card with the yellow "agent waiting" glow while `wait` runs in the background.
-- Typing a Redo note, pasting a marked-up screenshot, pressing Redo.
-- The agent's terminal picking up the verdict and posting the retake.
-- The Stop hook refusing to let the agent end its turn with an unread verdict.
+| File | What to capture |
+|---|---|
+| `hero.gif` | The whole loop in ~15 s: agent posts, notification, Redo with a note, retake arrives, OK. Under ~10 MB. |
+| `toast.png` | The desktop notification as the agent posts (crop to the notification). |
+| `inbox.png` | The inbox page with the item, ideally with the yellow "agent waiting" glow. |
+| `redo.gif` | Typing a Redo note (maybe pasting a marked-up screenshot) and pressing Redo. |
+| `retake.png` | The agent's terminal picking up the verdict, or the new card arriving on the page. |
+| `ok.png` | The retake's card after pressing OK. |
+
+Also worth having: the Stop hook refusing to let the agent end its turn with an unread verdict.
