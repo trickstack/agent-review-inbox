@@ -91,15 +91,16 @@ Point it at `skills/review-inbox/SKILL.md` (paste it into your AGENTS.md or rule
 `--session <any stable id>` so it owns its items. You get the inbox, notifications and `wait`; the turn-end enforcement
 needs a hook system that can block the end of a turn.
 
-Needs Python 3.9+ (`winget install Python.Python.3.12`, `brew install python`, `sudo apt install python3`). Without
-it the inbox is off, and the SessionStart hook tells the agent so it can offer to install it. Optional capture tools; `review.py doctor` says which are missing and how to install them, and the
+Needs Python 3.9+ (`winget install Python.Python.3.12` or the [python.org installer](https://www.python.org/downloads/),
+`brew install python`, `sudo apt install python3`). Without it the inbox is off, and the SessionStart hook tells the agent
+so it can offer to install it. Optional capture tools; `review.py doctor` says which are missing and how to install them, and the
 SessionStart hook tells the agent too:
 
 | Tool | For | Install |
 |---|---|---|
-| ffmpeg | screen and window recording, contact sheets | `winget install Gyan.FFmpeg`, `brew install ffmpeg`, `sudo apt install ffmpeg` |
-| Playwright | clips, stills and scripted steps on web pages | `pip install playwright && playwright install chromium` |
-| pyautogui | scripted steps on desktop apps | `pip install pyautogui` |
+| ffmpeg | screen and window recording, contact sheets, `frames` | `winget install Gyan.FFmpeg` (or ffmpeg.exe from the [gyan.dev essentials zip](https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip) in `~/.local/bin`), `brew install ffmpeg`, `sudo apt install ffmpeg` |
+| Playwright | clips, stills and scripted steps on web pages | `python -m pip install playwright`, then `python -m playwright install chromium` |
+| pyautogui | scripted steps on desktop apps | `python -m pip install pyautogui` |
 
 macOS needs Screen Recording (and, for desktop steps, Accessibility) permission for your terminal or agent app. On Linux,
 screen recording and desktop steps need an X11 session; Wayland isn't supported.
@@ -121,6 +122,7 @@ The CLI, which you can run yourself too:
 | `review.py clip 6 [--window "Title"]` | record the screen or a window (ffmpeg) |
 | `review.py clip --url <page> --do "click text=Save; type hi"` | film an interaction: steps on a page, or `x,y` steps in a `--window` |
 | `review.py shot --url ... / --window "Title"` | still of a page, a window or the screen |
+| `review.py frames <clip.mp4> --at 2.4` | every frame around a moment, tiled: for flashes the 3 fps contact sheet misses |
 | `review.py doctor` | which optional capture tools are missing, and the install commands |
 | `review.py wait [<id>]` | block until answered (run in the background) |
 | `review.py ask "<question>" [--options A B]` | ask the human; options become one-click answers |

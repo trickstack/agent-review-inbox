@@ -22,6 +22,9 @@ skill's directory. The SessionStart hook prints the full command line: use exact
 2. **Inspect before you post, every time.** Read the contact sheet (`clip_sheet.jpg`) or the still, and check it really shows
    what you are about to claim: the moment is in frame, the right thing changed, nothing is broken, it isn't black. If not,
    retake it. The human should only ever see footage you have already checked.
+   - The sheet is 3 frames a second, so anything shorter than ~0.3 s (a flash, a hit, a pop) can fall between its frames.
+     For those, `review.py frames <clip.mp4> --at <seconds>` tiles every frame of the 0.6 s around that moment
+     (`--span`, `--fps` to change it). Read that instead.
 3. **Post.** `review.py add --title "<what it is>" --topic <area> --how "<how to get there and what to judge>" --media <files>`
    - Write `--how` in calm, plain prose: where to look, what changed, what you want judged. Claim only what the footage shows.
    - Several takes go in one `add` (`--media a/clip.mp4 b/clip.mp4`), each path once, each named for what it is
@@ -31,6 +34,9 @@ skill's directory. The SessionStart hook prints the full command line: use exact
 4. **Wait.** Run `review.py wait` as a **background** command (`run_in_background`) and end your turn or keep working.
    It exits with the verdict when the human answers. It exits 3 before your prompt cache would go cold: then don't re-arm it.
    The verdict reaches you with the next prompt instead.
+   - No `run_in_background` in your agent? Start it detached and read its output later: `nohup <cli> wait > wait.log 2>&1 &`
+     in bash, or `Start-Process -NoNewWindow -RedirectStandardOutput wait.log <python> "<review.py> ... wait"` in
+     PowerShell. Never run it in the foreground: it can block for most of an hour.
 5. **Act on the verdict. It is work, not a notification**, even when it arrives as a background-task notice.
    - **REDO**: read the note and any attached images (`list` and `wait` print their paths), rework it, and post the next take
      in the same turn.
@@ -73,3 +79,6 @@ pushes back once if your turn ends on a question with nothing posted.
 - `review.py list [--open] [--topic <area>]`: what's open, and verdicts with their notes.
 - `review.py revoke <id>`: take down your own unanswered item (posted the wrong take). Then post the right one.
 - `review.py dismiss <id> "<why>"`: close an open item that no longer needs an answer (superseded, already fixed).
+
+The inbox lives in `~/.review-inbox`, outside your project. If a project keeps its own (`REVIEW_INBOX_DIR` pointing inside
+it), that folder git-ignores itself, so it never lands in a commit.

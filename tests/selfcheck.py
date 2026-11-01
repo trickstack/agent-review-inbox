@@ -196,7 +196,7 @@ assert r.returncode and "another session" in r.stderr and os.path.isdir(os.path.
 r = run("handled", "20000101-000000-nothing", "x")
 assert r.returncode and "no item" in r.stderr and "Traceback" not in r.stderr, r
 # the CLI handed to the agent names the inbox, so it finds the same one as the hooks wherever it runs
-assert f'--dir "{tmp}"' in hook("SessionStart")
+assert f'--dir "{review.shown(tmp)}"' in hook("SessionStart") and "\\" not in hook("SessionStart").split("CLI")[1]  # one slash style
 other = tempfile.mkdtemp()
 subprocess.run([sys.executable, CLI, "--dir", tmp, "--session", "d1", "add", "--title", "From elsewhere"], env={**ENV, "REVIEW_INBOX_DIR": other},
                capture_output=True)
@@ -236,5 +236,15 @@ subprocess.run([sys.executable, CLI, "--dir", shared, "dismiss", site["id"], "al
 said = lambda sid: subprocess.run([sys.executable, CLI, "hook"], env=base_env, capture_output=True, text=True,
                                   input=json.dumps({"session_id": sid, "hook_event_name": "UserPromptSubmit"})).stdout
 assert said("pa") == "" and "From site" in said("pb")
+
+# frames: every frame around a short moment, tiled; a moment past the end says so in one line
+if review.ffmpeg():
+    mp4 = os.path.join(tmp, "count.mp4")
+    subprocess.run([review.ffmpeg(), "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=320x180:rate=25:duration=3",
+                    "-pix_fmt", "yuv420p", mp4], check=True)
+    r = run("frames", mp4, "--at", "1.5")
+    assert r.returncode == 0 and "15 frames" in r.stdout and os.path.getsize(os.path.join(tmp, "frames_1.5s.jpg")) > 0, r
+    r = run("frames", mp4, "--at", "9")
+    assert r.returncode and r.stderr.strip() == "no frames were made; is --at inside the clip?", r.stderr
 
 print("selfcheck ok")

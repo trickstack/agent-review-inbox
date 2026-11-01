@@ -5,6 +5,7 @@
     review.py clip 6 [--window "My Game"]           record the screen / a window for 6 s (ffmpeg)
     review.py clip --url ... --do "click text=Save; type hi; key Enter"   film an interaction (steps below)
     review.py shot [--url ... | --window "My Game"] still of a page (Playwright) or a window / the screen -> draft shot.png
+    review.py frames clip.mp4 --at 2.4   every frame around a moment, tiled (a 3 fps sheet misses flashes under ~0.3 s)
     review.py doctor                optional capture tools: what's missing, what it disables, the install command
     review.py ask "Red or blue paddle?" [--options Red Blue]   a question for the human: answered on the page like a verdict
     review.py list [--open] [--topic juice]
@@ -36,7 +37,19 @@ command, {out} and {seconds} are filled in), REVIEW_INBOX_NO_TOAST, REVIEW_INBOX
 import argparse, base64, binascii, glob, http.server, json, os, re, shutil, subprocess, sys, time
 from datetime import datetime
 
-CLI = f'"{sys.executable}" "{os.path.abspath(__file__)}"'  # the interpreter that ran this: python3 vs python differs per OS
+def shown(path):
+    """A path as printed for the agent: forward slashes on Windows too, which bash, PowerShell and Python all accept."""
+    return path.replace("\\", "/") if os.name == "nt" else path
+
+
+def run_cmd(exe):
+    """A program to start in a printed command: bare when it can be, else quoted (and `& ` for PowerShell on Windows)."""
+    exe = shown(exe)
+    return exe if " " not in exe else f'& "{exe}"' if os.name == "nt" else f'"{exe}"'
+
+
+PY = run_cmd(sys.executable)  # the interpreter that ran this: python3 vs python differs per OS
+CLI = f'"{shown(sys.executable)}" "{shown(os.path.abspath(__file__))}"'
 SID = os.environ.get("REVIEW_INBOX_SESSION") or os.environ.get("CLAUDE_CODE_SESSION_ID", "")  # the agent session using the CLI
 HOST = os.environ.get("REVIEW_INBOX_HOST") or "127.0.0.1"
 PORT = int(os.environ.get("REVIEW_INBOX_PORT") or 7700)
@@ -184,7 +197,7 @@ def revoke(item_id):
 
 
 def reply_paths(item):
-    return "".join(f"\nimage: {os.path.join(DIR, item['id'], r)}" for r in item.get("reply", []))
+    return "".join(f"\nimage: {shown(os.path.join(DIR, item['id'], r))}" for r in item.get("reply", []))
 
 
 def mark(item_id, name, text=""):
@@ -207,7 +220,8 @@ def mine(sid):
 # ---------------------------------------------------------------- capture
 
 def ffmpeg():
-    return shutil.which("ffmpeg")
+    local = os.path.join(os.path.expanduser("~"), ".local", "bin", "ffmpeg" + (".exe" if os.name == "nt" else ""))
+    return shutil.which("ffmpeg") or (local if os.path.isfile(local) else None)
 
 
 def sheet(mp4, out_dir, seconds):
@@ -216,6 +230,18 @@ def sheet(mp4, out_dir, seconds):
     rows = max(1, -(-int(seconds) * 3 // cols))
     subprocess.run([ffmpeg(), "-v", "error", "-y", "-i", mp4, "-vf", f"fps=3,scale=426:-2,tile={cols}x{rows}",
                     "-frames:v", "1", "-update", "1", os.path.join(out_dir, "clip_sheet.jpg")])
+
+
+def frames(mp4, at, span=0.6, fps=25):
+    """Every frame (at `fps`) in `span` seconds around `at`, tiled into one image next to the clip, for effects too short
+    for the 3 fps contact sheet. Returns its path."""
+    n = max(1, round(span * fps))
+    cols = min(n, 6)
+    out = os.path.join(os.path.dirname(os.path.abspath(mp4)), f"frames_{at:g}s.jpg")
+    subprocess.run([ffmpeg(), "-v", "error", "-y", "-ss", f"{max(0.0, at - span / 2):.3f}", "-t", f"{span:.3f}", "-i", mp4,
+                    "-vf", f"fps={fps},scale=360:-2,tile={cols}x{-(-n // cols)}", "-frames:v", "1", "-update", "1", out],
+                   capture_output=True)  # past the clip's end ffmpeg only complains; the caller says so in one line
+    return out
 
 
 STEP_VERBS = ("click", "dblclick", "move", "type", "key", "scroll", "wait")
@@ -444,21 +470,23 @@ def doctor():
     import importlib.util
     has = lambda mod: importlib.util.find_spec(mod) is not None
     mac, linux = sys.platform == "darwin", sys.platform.startswith("linux")
-    pip = f'"{sys.executable}" -m pip install'
+    pip = f"{PY} -m pip install"
     out = []
     if sys.version_info < (3, 9):
         out.append(("Python 3.9+", "everything", "install a newer Python"))
     if not ffmpeg():
         out.append(("ffmpeg", "screen and window recording, contact sheets, mp4 from page clips",
-                    "brew install ffmpeg" if mac else "sudo apt install ffmpeg" if linux else "winget install Gyan.FFmpeg"))
+                    "brew install ffmpeg" if mac else "sudo apt install ffmpeg" if linux else
+                    "winget install Gyan.FFmpeg; or without winget, unzip ffmpeg.exe from "
+                    "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip into ~/.local/bin"))
     if not has("playwright"):
-        out.append(("playwright", "clips and stills of web pages", f"{pip} playwright && playwright install chromium"))
+        out.append(("playwright", "clips and stills of web pages", f"{pip} playwright; then {PY} -m playwright install chromium"))
     else:
         home = os.environ.get("PLAYWRIGHT_BROWSERS_PATH") or os.path.expanduser(
             "~/Library/Caches/ms-playwright" if mac else "~/.cache/ms-playwright" if linux
             else os.path.join(os.environ.get("LOCALAPPDATA", ""), "ms-playwright"))
         if not glob.glob(os.path.join(home, "chromium*")):
-            out.append(("Playwright's Chromium", "clips and stills of web pages", f'"{sys.executable}" -m playwright install chromium'))
+            out.append(("Playwright's Chromium", "clips and stills of web pages", f"{PY} -m playwright install chromium"))
     if not has("pyautogui"):
         out.append(("pyautogui", "scripted steps (--do) on desktop apps", f"{pip} pyautogui"))
     if mac:
@@ -523,7 +551,7 @@ def ensure_server():
     try:
         got = urllib.request.urlopen(PAGE + "api/dir", timeout=1).read().decode()
         if os.path.normcase(got) != os.path.normcase(DIR):
-            print(f"note: port {PORT} serves another inbox ({got}), not {DIR}; give one of them its own REVIEW_INBOX_PORT")
+            print(f"note: port {PORT} serves another inbox ({shown(got)}), not {shown(DIR)}; give one of them its own REVIEW_INBOX_PORT")
         return
     except OSError:
         pass
@@ -536,7 +564,7 @@ def ensure_server():
 
 def cli(sid):
     """The command line to hand an agent: carries its session, so agents without CLAUDE_CODE_SESSION_ID still own their items."""
-    return CLI + f' --dir "{DIR}"' + (f" --session {sid}" if sid else "")  # the CLI finds the same inbox as the hooks
+    return CLI + f' --dir "{shown(DIR)}"' + (f" --session {sid}" if sid else "")  # the CLI finds the same inbox as the hooks
 
 
 def act(sid):
@@ -843,6 +871,11 @@ if __name__ == "__main__":
         x.add_argument("--do", default="", help='steps, e.g. "click text=Save; type hello; key Enter"')
         x.add_argument("--script", default="", help="a file of steps, one per line")
     sub.add_parser("doctor")
+    fr = sub.add_parser("frames")
+    fr.add_argument("mp4")
+    fr.add_argument("--at", type=float, required=True, help="the moment, in seconds")
+    fr.add_argument("--span", type=float, default=0.6, help="seconds around it")
+    fr.add_argument("--fps", type=float, default=25)
     q = sub.add_parser("ask")
     q.add_argument("question")
     q.add_argument("--options", nargs="*", default=[], help="one-click answers shown on the page")
@@ -872,7 +905,7 @@ if __name__ == "__main__":
         item, d = add("review", args.title, args.topic, args.how, args.media, args.by)
         ensure_server()
         toast("Review: " + args.title, (f"{args.by}: " if args.by else "") + (args.how or args.topic))
-        print(d)
+        print(shown(d))
         print("media:", ", ".join(item["media"]) or "none")
         print(f"Page: {PAGE}\nWake on the answer: run `{cli(SID)} wait` as a background command (run_in_background).")
     elif args.cmd == "clip":
@@ -882,22 +915,31 @@ if __name__ == "__main__":
         media = clip(d, args.seconds, args.url, args.window, steps)
         if not media:
             sys.exit(f"no clip was made; `{cli(SID)} doctor` lists missing capture tools")
-        print("made:", ", ".join(os.path.join(d, m) for m in media))
+        print("made:", ", ".join(shown(os.path.join(d, m)) for m in media))
         if "clip_sheet.jpg" in media:
-            print(f"Read {os.path.join(d, 'clip_sheet.jpg')} first; if it shows the moment, post with --media {os.path.join(d, media[0])}")
+            print(f"Read {shown(os.path.join(d, 'clip_sheet.jpg'))} first; if it shows the moment, post with --media {shown(os.path.join(d, media[0]))}")
+            print(f"The sheet is 3 fps: a flash or hit under ~0.3 s can fall between its frames. Check one with "
+                  f"`{cli(SID)} frames {shown(os.path.join(d, media[0]))} --at <seconds>`.")
     elif args.cmd == "ask":
         item, d = add("question", args.question, args.topic, by=args.by, options=args.options)
         ensure_server()
         toast("Question: " + args.question, (f"{args.by}: " if args.by else "") + " / ".join(args.options))
-        print(d)
+        print(shown(d))
         print(f"Page: {PAGE}\nWake on the answer: run `{cli(SID)} wait` as a background command (run_in_background).")
+    elif args.cmd == "frames":
+        if not ffmpeg():
+            sys.exit(f"needs ffmpeg (see `{cli(SID)} doctor`)")
+        out = frames(args.mp4, args.at, args.span, args.fps)
+        if not os.path.exists(out):
+            sys.exit("no frames were made; is --at inside the clip?")
+        print(f"Read {shown(out)}: {round(args.span * args.fps)} frames from {max(0.0, args.at - args.span / 2):g} s, left to right, top to bottom")
     elif args.cmd == "shot":
         d = draft_dir()
         png = os.path.join(d, "shot.png")
         shot(png, args.url, args.window, steps)
         if not os.path.exists(png):
             sys.exit("no still was made")
-        print(f"Read {png} first; if it shows what you claim, post with --media {png}")
+        print(f"Read {shown(png)} first; if it shows what you claim, post with --media {shown(png)}")
         if args.window:
             print("Desktop step targets are x,y pixels in this image (from its top-left).")
     elif args.cmd == "doctor":
