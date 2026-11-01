@@ -127,12 +127,25 @@ def save(item):
         json.dump(item, f, indent=1)
 
 
+def load(item_id):
+    """An item.json. save() rewrites it in place, so a read can land between the truncate and the write (the page
+    answering while `wait` polls and the hooks look): such a torn read is retried, else `wait` crashed with a traceback
+    and the item dropped out of the hooks' and the page's lists for that moment."""
+    for n in range(20):
+        try:
+            with open(os.path.join(DIR, item_id, "item.json"), encoding="utf-8") as f:
+                return json.load(f)
+        except ValueError:
+            if n == 19:
+                raise
+            time.sleep(0.01)
+
+
 def items():
     out = []
     for name in sorted(os.listdir(DIR) if os.path.isdir(DIR) else [], reverse=True):
         try:
-            with open(os.path.join(DIR, name, "item.json"), encoding="utf-8") as f:
-                out.append(json.load(f))
+            out.append(load(name))
         except (OSError, ValueError):
             pass
     return out
@@ -186,8 +199,7 @@ def remove_reply(item_id, name):
 def revoke(item_id):
     """Take an unanswered item down (the agent posted it and wants a retake); answered items stay for the record."""
     d = os.path.join(DIR, os.path.basename(item_id))
-    with open(os.path.join(d, "item.json"), encoding="utf-8") as f:
-        item = json.load(f)
+    item = load(os.path.basename(item_id))
     if item.get("answered"):
         raise SystemExit(f"already answered ({item['status']}), left in place")
     if item.get("sid") and item["sid"] != SID:
@@ -600,10 +612,12 @@ def unresolved(sid):
     own = mine(sid)
     out = []
     for i in own:
-        a = i.get("answered") or ""
+        since = (i.get("answered") or "").replace("-", "").replace(":", "").replace(" ", "-")  # in the id's YYYYmmdd-HHMMSS form
         if i["status"] not in ("redo", "ok") or marked(i["id"], "handled") is not None:
             continue
-        if any(j["id"] > i["id"] and j.get("created", "") >= a[:16] for j in own):
+        # posted since the answer, to the second: `created` has minutes only and ids sort by title within a second, so
+        # comparing those let an item posted *before* the verdict (same minute) pass for its retake
+        if any(j["id"] != i["id"] and j["id"][:15] >= since for j in own):
             continue
         out.append(i)
     return out
@@ -638,8 +652,7 @@ def wait(item_id="", sid=None):
             got = []
             for i in ids:
                 try:
-                    with open(os.path.join(DIR, i, "item.json"), encoding="utf-8") as f:
-                        got.append(json.load(f))
+                    got.append(load(i))
                     mark(i, "waiting.json", json.dumps({"pid": os.getpid(), "sid": sid}))  # heartbeat: the page highlights it
                 except FileNotFoundError:
                     pass
@@ -961,6 +974,8 @@ if __name__ == "__main__":
     elif args.cmd == "revoke":
         revoke(args.id)
     elif args.cmd == "handled":
+        if (load(os.path.basename(args.id)).get("sid") or "") not in ("", SID):  # as revoke: a wrong id mustn't silence another session's Stop hook
+            sys.exit("posted by another session, left in place")
         mark(os.path.basename(args.id), "handled", args.what)
         print("handled:", args.what)
     elif args.cmd == "dismiss":
