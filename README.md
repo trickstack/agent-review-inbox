@@ -1,8 +1,6 @@
 <div align="center">
 
-<img src="assets/logo.svg" alt="" width="112">
-
-<h1>agent-review-inbox</h1>
+<h1><img src="assets/logo.svg" alt="" height="36">&nbsp; Agent Review Inbox</h1>
 
 <p><b>A review inbox for agent work that needs a human's eyes.</b></p>
 
@@ -11,7 +9,6 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license"></a>
   <a href="#install"><img src="https://img.shields.io/badge/Claude%20Code-plugin-D97757" alt="Claude Code plugin"></a>
   <a href="docs/codex-test.md"><img src="https://img.shields.io/badge/Codex-untested-lightgrey" alt="Codex (untested)"></a>
-  <a href="https://github.com/trickstack/agent-review-inbox/stargazers"><img src="https://img.shields.io/github/stars/trickstack/agent-review-inbox?style=flat" alt="GitHub stars"></a>
 </p>
 
 <!-- HERO: replace assets/hero.gif with the recorded review loop (~15 s): agent posts, notification pops,
