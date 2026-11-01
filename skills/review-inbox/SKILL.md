@@ -7,7 +7,8 @@ description: Post work a human has to judge by eye, ear or feel (UI and layout c
 
 The human reviews your visual and feel work on one page (`http://127.0.0.1:7700/` by default), from any session, and answers
 **OK** or **Redo** with a note and sometimes images. Every command below is `python review.py ...`, with `review.py` in this
-skill's directory. The SessionStart hook prints the full command line.
+skill's directory. The SessionStart hook prints the full command line: use exactly that one, since it can carry
+`--session <id>`, which ties your items to you in agents that don't set `CLAUDE_CODE_SESSION_ID` (Codex, others).
 
 ## The loop
 

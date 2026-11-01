@@ -4,7 +4,8 @@
 looking, listening or playing (a UI change, an animation, a particle effect, game feel, a sound), records it, and posts it
 to one page. You answer **OK** or **Redo** with a note. The verdict wakes the agent, and a hook makes sure it acts on it.
 
-A Claude Code plugin: one Python file (stdlib only), one HTML page, three hooks and a skill.
+A plugin for **Claude Code** and **Codex**: one Python file (stdlib only), one HTML page, three hooks and a skill.
+The CLI works with any agent that can run a shell command.
 
 <!-- GIF: the whole loop in ~15 s: agent posts, notification pops, Redo with a note, agent posts the retake -->
 ![The loop](docs/media/loop.gif)
@@ -29,12 +30,29 @@ waiting on you in a different window. The inbox gives that judgement one place a
 
 ## Install
 
+**Claude Code**
+
 ```bash
-claude plugin marketplace add <path or GitHub repo>
+claude plugin marketplace add trickstack/agent-review-inbox
 claude plugin install agent-review-inbox@agent-review-inbox
 ```
 
 Or try it for one session without installing: `claude --plugin-dir /path/to/agent-review-inbox`.
+
+**Codex**
+
+```bash
+codex plugin marketplace add trickstack/agent-review-inbox
+```
+
+Then install it from `/plugins` in `codex`, start a new session, and trust its three hooks in `/hooks` (Codex skips
+plugin hooks until you do). Codex support is new; see [docs/codex-test.md](docs/codex-test.md).
+
+**Any other agent**
+
+Point it at `skills/review-inbox/SKILL.md` (paste it into your AGENTS.md or rules file) and have it pass
+`--session <any stable id>` so it owns its items. You get the inbox, notifications and `wait`; the turn-end enforcement
+needs a hook system that can block the end of a turn.
 
 Needs Python 3.9+. Optional: `ffmpeg` (screen recording, contact sheets) and Playwright (`pip install playwright &&
 playwright install chromium`) for clips and stills of web pages.

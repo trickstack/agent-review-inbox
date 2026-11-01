@@ -79,4 +79,19 @@ run("handled", item["id"], "reworked, retake posted")
 assert hook("Stop") == ""
 assert "review inbox" in hook("SessionStart")
 
+# an agent without CLAUDE_CODE_SESSION_ID (Codex): the SessionStart hook hands it a CLI carrying --session
+env = {k: v for k, v in ENV.items() if k != "CLAUDE_CODE_SESSION_ID"}
+start = subprocess.run([sys.executable, CLI, "hook"], env=env, input=json.dumps({"session_id": "c1", "hook_event_name": "SessionStart"}),
+                       capture_output=True, text=True).stdout
+assert "--session c1" in start, start
+subprocess.run([sys.executable, CLI, "--session", "c1", "add", "--title", "Codex take"], env=env, capture_output=True)
+assert next(i for i in review.items() if i["title"] == "Codex take")["sid"] == "c1"
+stop = subprocess.run([sys.executable, CLI, "hook"], env=env, input=json.dumps({"session_id": "c1", "hook_event_name": "Stop"}),
+                      capture_output=True, text=True).stdout
+assert "nothing waiting" in stop and "--session c1 wait" in stop, stop
+# no transcript to read: `wait` still gives up before the cache would go cold, timed from when it began
+quick = subprocess.run([sys.executable, CLI, "--session", "c1", "wait"], env={**env, "REVIEW_INBOX_WARM_MIN": "5.01"},
+                       capture_output=True, text=True, timeout=30)
+assert quick.returncode == 3, quick.stdout
+
 print("selfcheck ok")

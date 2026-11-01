@@ -15,7 +15,8 @@
 
 Storage: one folder per item in <project>/.review-inbox/<id>/ (item.json + media), so parallel sessions never write the
 same file. Status: open -> ok | redo | dismissed (a bug stays open once the human describes it: that's the agent's cue).
-Items remember the posting session (CLAUDE_CODE_SESSION_ID); the hook hands that session its verdicts, with the next
+Items remember the posting session (CLAUDE_CODE_SESSION_ID in Claude Code; --session or REVIEW_INBOX_SESSION elsewhere,
+which the SessionStart hook hands the agent); the hook hands that session its verdicts, with the next
 prompt or by blocking the end of a turn until it has read and acted on them.
 
 Environment: REVIEW_INBOX_DIR (default <project>/.review-inbox), REVIEW_INBOX_PORT (7700), REVIEW_INBOX_HOST (127.0.0.1),
@@ -26,6 +27,7 @@ import argparse, base64, binascii, glob, http.server, json, os, re, shutil, subp
 from datetime import datetime
 
 CLI = f'"{sys.executable}" "{os.path.abspath(__file__)}"'  # the interpreter that ran this: python3 vs python differs per OS
+SID = os.environ.get("REVIEW_INBOX_SESSION") or os.environ.get("CLAUDE_CODE_SESSION_ID", "")  # the agent session using the CLI
 HOST = os.environ.get("REVIEW_INBOX_HOST") or "127.0.0.1"
 PORT = int(os.environ.get("REVIEW_INBOX_PORT") or 7700)
 PAGE = f"http://127.0.0.1:{PORT}/"
@@ -67,7 +69,7 @@ def add(kind, title, topic="", how="", media=(), by=""):
         shutil.copy2(m, os.path.join(d, name))
         names.append(name)
     item = dict(id=os.path.basename(d), kind=kind, title=title, topic=topic, how=how, by=by,
-                sid=os.environ.get("CLAUDE_CODE_SESSION_ID", ""),  # the poster: `hook` hands the verdict to this session
+                sid=SID,  # the poster: `hook` hands the verdict to this session
                 media=names, created=time.strftime("%Y-%m-%d %H:%M"), status="open", note="")
     save(item)
     return item, d
@@ -282,8 +284,14 @@ def ensure_server():
 
 # ---------------------------------------------------------------- the agent side of the loop
 
-ACT = ("The human answered your review item(s) in the review inbox. This is work, not a notification: REDO = rework it and post "
-       f"the next take now; OK = finish it (commit if your project's rules say so), then `{CLI} handled <id> \"committed <hash>\"`.\n")
+def cli(sid):
+    """The command line to hand an agent: carries its session, so agents without CLAUDE_CODE_SESSION_ID still own their items."""
+    return CLI + (f" --session {sid}" if sid else "")
+
+
+def act(sid):
+    return ("The human answered your review item(s) in the review inbox. This is work, not a notification: REDO = rework it and post "
+            f"the next take now; OK = finish it (commit if your project's rules say so), then `{cli(sid)} handled <id> \"committed <hash>\"`.\n")
 
 
 def verdict(item):
@@ -338,7 +346,8 @@ def last_turn(sid):
 def wait(item_id="", sid=None):
     """Block until the human answers item_id, or any of this session's open items without an id (0); revoked (4);
     nothing to wait on (5); give up while sid's prompt cache is still warm (3), so the answer never wakes a cold cache."""
-    sid = os.environ.get("CLAUDE_CODE_SESSION_ID", "") if sid is None else sid
+    sid = SID if sid is None else sid
+    start = time.time()
     ids = [os.path.basename(item_id)] if item_id else [i["id"] for i in mine(sid) if not i.get("answered")]
     if not ids:
         print("No open items posted by this session.")
@@ -358,9 +367,9 @@ def wait(item_id="", sid=None):
                 return 4
             done = [i for i in got if i.get("answered")]  # already answered counts: the human may answer between `add` and `wait`
             if done:
-                print(ACT + deliver(done))
+                print(act(sid) + deliver(done))
                 return 0
-            last = last_turn(sid)
+            last = last_turn(sid) or start  # no transcript to read (another agent): the agent went idle when `wait` began
             if last and time.time() - last > (WARM_MIN - 5) * 60:
                 for i in got:
                     mark(i["id"], "gaveup")  # the Stop hook won't ask for a re-arm; the answer comes with the next prompt
@@ -382,26 +391,26 @@ def hook():
     sid, name = ev.get("session_id", ""), ev.get("hook_event_name")
     if name == "SessionStart":
         print(f"This project has a review inbox ({PAGE}). When you finish something a human has to judge by eye, ear or feel "
-              f"(UI, visuals, animation, motion, sound, copy), post it there instead of asking in chat: see the review-inbox skill. CLI: {CLI}")
+              f"(UI, visuals, animation, motion, sound, copy), post it there instead of asking in chat: see the review-inbox skill. CLI (use exactly this, it carries your session): {cli(sid)}")
         return
     stop = name == "Stop"
     found = undelivered(sid)
     if found:
-        text = ACT + deliver(found)
+        text = act(sid) + deliver(found)
         print(json.dumps({"decision": "block", "reason": text}) if stop else text)
         return
     if stop and not ev.get("stop_hook_active"):
         todo = unresolved(sid)
         if todo:
             print(json.dumps({"decision": "block", "reason": "You haven't acted on the human's verdict yet:\n" + "\n".join(verdict(i) for i in todo)
-                              + f"\nREDO: rework it and post the next take (`{CLI} add`). OK: finish it, then `{CLI} handled <id> "
+                              + f"\nREDO: rework it and post the next take (`{cli(sid)} add`). OK: finish it, then `{cli(sid)} handled <id> "
                               "\"committed <hash>\"`. Only if you truly can't go on alone (you need the human's answer): "
-                              f"`{CLI} handled <id> \"<why>\"` and ask them."}))
+                              f"`{cli(sid)} handled <id> \"<why>\"` and ask them."}))
             return
         idle = [i["id"] for i in mine(sid) if not i.get("answered") and not waiting(i["id"]) and marked(i["id"], "gaveup") is None]
         if idle:
             print(json.dumps({"decision": "block", "reason": f"Open review item(s) {', '.join(idle)} with nothing waiting for the answer: "
-                              f"run `{CLI} wait` as a background command (run_in_background), then end your turn."}))
+                              f"run `{cli(sid)} wait` as a background command (run_in_background), then end your turn."}))
 
 
 # ---------------------------------------------------------------- the page
@@ -491,6 +500,7 @@ def serve():
 if __name__ == "__main__":
     sys.stdout.reconfigure(errors="replace")  # a note with a char the console code page lacks mustn't crash `list`
     ap = argparse.ArgumentParser()
+    ap.add_argument("--session", help="the agent session posting/waiting (default: REVIEW_INBOX_SESSION or CLAUDE_CODE_SESSION_ID)")
     sub = ap.add_subparsers(dest="cmd", required=True)
     a = sub.add_parser("add")
     a.add_argument("--title", required=True)
@@ -518,13 +528,14 @@ if __name__ == "__main__":
     h_.add_argument("id")
     h_.add_argument("what", help='"committed <hash>", or why you are stopping (and ask the human)')
     args = ap.parse_args()
+    SID = args.session or SID
     if args.cmd == "add":
         item, d = add(args.kind, args.title, args.topic, args.how, args.media, args.by)
         ensure_server()
         toast("Review: " + args.title, (f"{args.by}: " if args.by else "") + (args.how or args.topic))
         print(d)
         print("media:", ", ".join(item["media"]) or "none")
-        print(f"Page: {PAGE}\nWake on the answer: run `{CLI} wait` as a background command (run_in_background).")
+        print(f"Page: {PAGE}\nWake on the answer: run `{cli(SID)} wait` as a background command (run_in_background).")
     elif args.cmd == "clip":
         d = draft_dir()
         media = clip(d, args.seconds, args.url, args.window)
