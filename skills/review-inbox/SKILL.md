@@ -39,7 +39,8 @@ skill's directory. The SessionStart hook prints the full command line: use exact
      PowerShell. Never run it in the foreground: it can block for most of an hour.
 5. **Act on the verdict. It is work, not a notification**, even when it arrives as a background-task notice.
    - **REDO**: read the note and any attached images (`list` and `wait` print their paths), rework it, and post the next take
-     in the same turn.
+     in the same turn. The retake is a **new item** (`add`): the REDO'd item stays as history, and your newer item is what
+     satisfies the Stop hook.
    - **OK**: finish it (commit if your project's rules allow), then `review.py handled <id> "committed <hash>"`.
    - Truly need the human's answer before you can go on? `review.py handled <id> "<why>"`, then ask (below).
 

@@ -190,6 +190,8 @@ assert r.returncode and "no such file" in r.stderr and set(os.listdir(tmp)) == b
 a1, _ = review.add("review", "Twin")
 a2, _ = review.add("review", "Twin")
 assert a1["id"] != a2["id"]
+long, _ = review.add("review", "Brick burst, take 2: 0.3 s shorter and brighter")
+assert long["id"].endswith("-brick-burst-take-2"), long["id"]  # four whole words, never a word cut in half
 # revoke and handled: only your own items, and a clean error for an unknown id
 r = run("--session", "someone-else", "revoke", a1["id"])
 assert r.returncode and "another session" in r.stderr and os.path.isdir(os.path.join(tmp, a1["id"])), r

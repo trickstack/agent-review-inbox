@@ -88,7 +88,7 @@ def add(kind, title, topic="", how="", media=(), by="", options=None):
     missing = [m for m in media if not os.path.isfile(m)]
     if missing:  # before the folder exists, so a typo leaves nothing behind
         raise SystemExit("no such file: " + ", ".join(missing))
-    slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:40]
+    slug = "-".join(re.findall(r"[a-z0-9]+", title.lower())[:4]) or "item"  # first four whole words: ids stay readable
     base = os.path.join(DIR, time.strftime("%Y%m%d-%H%M%S-") + slug)
     d, n = base, 1
     while True:  # two posts with one title in the same second
