@@ -22,7 +22,9 @@ Items remember the posting session (CLAUDE_CODE_SESSION_ID in Claude Code; --ses
 which the SessionStart hook hands the agent); the hook hands that session its verdicts, with the next
 prompt or by blocking the end of a turn until it has read and acted on them.
 
-Environment: REVIEW_INBOX_DIR (default <project>/.review-inbox), REVIEW_INBOX_PORT (7700), REVIEW_INBOX_HOST (127.0.0.1),
+Environment: REVIEW_INBOX_DIR (default <project>/.review-inbox; --dir overrides it), REVIEW_INBOX_PORT (7700),
+REVIEW_INBOX_HOST (127.0.0.1), REVIEW_INBOX_SESSION, REVIEW_INBOX_BY, REVIEW_INBOX_AVF_INPUT (macOS capture device),
+REVIEW_INBOX_BEAT_S (5: how often `wait` polls),
 Steps (--do "a; b; c", or --script <file> with one per line): click <target>, dblclick <target>, move <target>,
 type <text>, key <combo>, scroll <dy>, wait <ms>. A target is a Playwright selector on a page (text=Save, #email) or x,y:
 on a page in viewport pixels, on the desktop relative to the --window's top-left (pick them from `shot --window`), else
@@ -42,6 +44,8 @@ PAGE = f"http://127.0.0.1:{PORT}/"
 WARM_MIN = float(os.environ.get("REVIEW_INBOX_WARM_MIN") or 50)
 BEAT_S = float(os.environ.get("REVIEW_INBOX_BEAT_S") or 5)  # `wait` polls and touches its waiting.json this often
 STATUSES = ("open", "ok", "redo", "dismissed", "answered")
+ANSWERS = {"review": ("ok", "redo", "dismissed"), "question": ("answered", "dismissed")}  # what the human can set, per kind
+MAX_BODY = 32 << 20  # a POST from the page: a note plus a few pasted screenshots
 IMAGE_EXT = {"image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp"}
 
 
@@ -63,9 +67,19 @@ DIR = inbox_dir()
 # ---------------------------------------------------------------- store
 
 def add(kind, title, topic="", how="", media=(), by="", options=None):
+    missing = [m for m in media if not os.path.isfile(m)]
+    if missing:  # before the folder exists, so a typo leaves nothing behind
+        raise SystemExit("no such file: " + ", ".join(missing))
     slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:40]
-    d = os.path.join(DIR, time.strftime("%Y%m%d-%H%M%S-") + slug)
-    os.makedirs(d)
+    base = os.path.join(DIR, time.strftime("%Y%m%d-%H%M%S-") + slug)
+    d, n = base, 1
+    while True:  # two posts with one title in the same second
+        try:
+            os.makedirs(d)
+            break
+        except FileExistsError:
+            n += 1
+            d = f"{base}-{n}"
     if not os.path.exists(os.path.join(DIR, ".gitignore")):  # the inbox never ends up in the project's commits
         with open(os.path.join(DIR, ".gitignore"), "w") as f:
             print("*", file=f)
@@ -115,9 +129,11 @@ def waiting(item_id):
 
 def answer(item_id, status, note, images=()):
     """images: data URLs the human pasted/dropped on the page -> reply_N.<ext> in the item folder, appended to item["reply"]."""
-    if status not in STATUSES or item_id not in os.listdir(DIR):  # id comes from the page: never a path
-        raise ValueError("bad id or status")
+    if item_id not in os.listdir(DIR):  # id comes from the page: never a path
+        raise ValueError("bad id")
     item = next(i for i in items() if i["id"] == item_id)
+    if status not in ANSWERS.get(item.get("kind"), ()):
+        raise ValueError(f"a {item.get('kind')} can't be set to {status!r}")
     reply = item.setdefault("reply", [])
     for url in images:
         head, _, data = url.partition(",")
@@ -154,6 +170,8 @@ def revoke(item_id):
         item = json.load(f)
     if item.get("answered"):
         raise SystemExit(f"already answered ({item['status']}), left in place")
+    if item.get("sid") and item["sid"] != SID:
+        raise SystemExit("posted by another session, left in place")
     shutil.rmtree(d)
     print("revoked", item["id"])
 
@@ -346,6 +364,8 @@ def clip(out_dir, seconds, url="", window="", steps=()):
     """Record `seconds` (with steps: until they're done, and at least `seconds`) -> out_dir/clip.mp4 (+ clip_sheet.jpg).
     Providers: REVIEW_INBOX_CLIP_CMD, a page (Playwright), or the screen / a window (ffmpeg). Returns the media names made."""
     mp4 = os.path.join(out_dir, "clip.mp4")
+    if window and os.name != "nt" and not url:
+        raise SystemExit("--window works on Windows only; leave it out to record the whole screen")
     if os.environ.get("REVIEW_INBOX_CLIP_CMD") and not steps:  # any recorder you like: a replay buffer, an engine's own capture
         subprocess.run(os.environ["REVIEW_INBOX_CLIP_CMD"].format(out=mp4, seconds=seconds), shell=True)
     elif url:
@@ -355,11 +375,11 @@ def clip(out_dir, seconds, url="", window="", steps=()):
             web_steps(page, steps)
             page.wait_for_timeout(max(LEAD_MS, seconds * 1000 - (time.time() - t) * 1000))
         webm = playwright_page(url, film, video_dir=out_dir)
-        if ffmpeg():
-            subprocess.run([ffmpeg(), "-v", "error", "-y", "-i", webm, "-c:v", "libx264", "-pix_fmt", "yuv420p",
-                            "-movflags", "+faststart", mp4])
+        ok = ffmpeg() and subprocess.run([ffmpeg(), "-v", "error", "-y", "-i", webm, "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                                          "-movflags", "+faststart", mp4]).returncode == 0
+        if ok:
             os.remove(webm)
-        else:
+        else:  # no ffmpeg, or it failed: keep the recording as it is
             os.replace(webm, os.path.join(out_dir, "clip.webm"))
     else:
         if not ffmpeg():
@@ -393,6 +413,8 @@ def duration(mp4):
 
 
 def shot(png, url="", window="", steps=()):
+    if window and os.name != "nt" and not url:
+        raise SystemExit("--window works on Windows only; leave it out for the whole screen")
     if url:
         return playwright_page(url, lambda page: (page.wait_for_timeout(1000), web_steps(page, steps),
                                                   page.wait_for_timeout(300), page.screenshot(path=png)))
@@ -507,7 +529,7 @@ def ensure_server():
 
 def cli(sid):
     """The command line to hand an agent: carries its session, so agents without CLAUDE_CODE_SESSION_ID still own their items."""
-    return CLI + (f" --session {sid}" if sid else "")
+    return CLI + f' --dir "{DIR}"' + (f" --session {sid}" if sid else "")  # the CLI finds the same inbox as the hooks
 
 
 def act(sid):
@@ -615,9 +637,10 @@ def hook():
     sid, name = ev.get("session_id", ""), ev.get("hook_event_name")
     if name == "SessionStart":
         print(f"This project has a review inbox ({PAGE}). When you finish something a human has to judge by eye, ear or feel "
-              f"(UI, visuals, animation, motion, sound, copy), post it there instead of asking in chat: see the review-inbox skill. CLI (use exactly this, it carries your session): {cli(sid)}")
-        try:
-            missing = doctor()
+              f"(UI, visuals, animation, motion, sound, copy), post it there instead of asking in chat: see the review-inbox skill. CLI (use exactly this, it carries your session): {cli(sid)}"
+              + (" (in PowerShell, put `& ` in front)" if os.name == "nt" else ""))
+        try:  # only in a project that already uses the inbox: every other session hears nothing about capture tools
+            missing = doctor() if items() else []
         except Exception:
             missing = []
         if missing:
@@ -648,8 +671,10 @@ def hook():
             print(json.dumps({"decision": "block", "reason": f"Open review item(s) {', '.join(idle)} with nothing waiting for the answer: "
                               f"run `{cli(sid)} wait` as a background command (run_in_background), then end your turn."}))
             return
-        # the human steers through the inbox and misses questions asked in chat: catch a turn that ends on one, once
-        if not any(not i.get("answered") for i in mine(sid)) and asks_human(last_message(ev)):
+        # the human steers through the inbox and misses questions asked in chat: catch a turn that ends on one, once.
+        # Only in a session that has used the inbox; anywhere else a question in chat is just a question.
+        own = mine(sid)
+        if own and not any(not i.get("answered") for i in own) and asks_human(last_message(ev)):
             print(json.dumps({"decision": "block", "reason": f"If that's a question for the human, post it with `{cli(sid)} ask \"<question>\" "
                               "[--options A B ...]` and run `wait` as a background command; otherwise just end your turn."}))
 
@@ -691,6 +716,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
 
+    def local(self):
+        """Only this page may talk to the server: a Host other than ours is DNS rebinding, a foreign Origin is another site."""
+        host, origin = self.headers.get("Host", ""), self.headers.get("Origin")
+        loopback = HOST in ("127.0.0.1", "localhost", "::1")  # bound wider (REVIEW_INBOX_HOST), any address of ours is fine
+        if (loopback and host not in (f"127.0.0.1:{PORT}", f"localhost:{PORT}")) or (origin and origin != f"http://{host}"):
+            self.send_error(403)
+            return False
+        return True
+
     def send_body(self, body, ctype="application/json", code=200):
         b = body.encode() if isinstance(body, str) else body
         self.send_response(code)
@@ -720,6 +754,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         else:
             self.send_response(200)
         self.send_header("Content-Type", ctype)
+        self.send_header("X-Content-Type-Options", "nosniff")
+        if not ctype.startswith(("image/", "video/", "audio/")) or ctype == "image/svg+xml":  # an attached .html/.svg can't run here
+            self.send_header("Content-Disposition", "attachment")
         self.send_header("Content-Length", str(end - start + 1))
         self.send_header("Accept-Ranges", "bytes")
         self.end_headers()
@@ -734,6 +771,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             pass
 
     def do_GET(self):
+        if not self.local():
+            return
         path = self.path.split("?")[0]
         if path == "/":
             with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "page.html"), "rb") as f:
@@ -752,10 +791,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_error(404)
 
     def do_POST(self):
+        if not self.local():
+            return
         if self.path != "/api/review":
             return self.send_error(404)
+        if not self.headers.get("Content-Type", "").startswith("application/json"):  # a form post from another site can't set it
+            return self.send_error(415)
         try:
-            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
+            size = int(self.headers.get("Content-Length", 0))
+            if size > MAX_BODY:
+                return self.send_error(413)
+            body = json.loads(self.rfile.read(size) or b"{}")
             if body.get("remove"):
                 return self.send_body(json.dumps(remove_reply(body.get("id", ""), body["remove"])))
             return self.send_body(json.dumps(answer(body.get("id", ""), body.get("status", ""), body.get("note", ""), body.get("images", []))))
@@ -770,9 +816,10 @@ def serve():
 
 
 if __name__ == "__main__":
-    sys.stdout.reconfigure(errors="replace")  # a note with a char the console code page lacks mustn't crash `list`
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # the human's note is the payload: never the console code page
     ap = argparse.ArgumentParser()
     ap.add_argument("--session", help="the agent session posting/waiting (default: REVIEW_INBOX_SESSION or CLAUDE_CODE_SESSION_ID)")
+    ap.add_argument("--dir", help="the inbox folder (default: REVIEW_INBOX_DIR, else <project>/.review-inbox)")
     sub = ap.add_subparsers(dest="cmd", required=True)
     a = sub.add_parser("add")
     a.add_argument("--title", required=True)
@@ -809,6 +856,9 @@ if __name__ == "__main__":
     h_.add_argument("what", help='"committed <hash>", or why you are stopping (and ask the human)')
     args = ap.parse_args()
     SID = args.session or SID
+    DIR = os.path.abspath(args.dir) if args.dir else DIR
+    if args.cmd in ("handled", "revoke", "dismiss") and not os.path.isfile(os.path.join(DIR, os.path.basename(args.id), "item.json")):
+        sys.exit(f"no item {args.id!r} in {DIR}")
     steps = [] if args.cmd not in ("clip", "shot") else (
         parse_steps(args.do) + (parse_steps(open(args.script, encoding="utf-8").read(), "\n") if args.script else []))
     if args.cmd == "add":
@@ -824,7 +874,7 @@ if __name__ == "__main__":
         d = draft_dir()
         media = clip(d, args.seconds, args.url, args.window, steps)
         if not media:
-            sys.exit("no clip was made")
+            sys.exit(f"no clip was made; `{cli(SID)} doctor` lists missing capture tools")
         print("made:", ", ".join(os.path.join(d, m) for m in media))
         if "clip_sheet.jpg" in media:
             print(f"Read {os.path.join(d, 'clip_sheet.jpg')} first; if it shows the moment, post with --media {os.path.join(d, media[0])}")

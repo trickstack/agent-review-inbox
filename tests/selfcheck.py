@@ -62,6 +62,28 @@ try:
             raise AssertionError("served " + bad)
         except urllib.error.HTTPError as e:
             assert e.code == 404
+    # only this page may talk to the server: a foreign Host (DNS rebinding), a foreign Origin, or a non-JSON post is refused
+    def code(path, data=None, **hdr):
+        try:
+            return urllib.request.urlopen(urllib.request.Request(base + path, data, hdr)).status
+        except urllib.error.HTTPError as e:
+            return e.code
+    js = {"Content-Type": "application/json"}
+    nope = json.dumps({"id": item["id"], "status": "ok"}).encode()
+    assert code("/api/review", Host="evil.example:7799") == 403
+    assert code("/api/review", nope, Origin="https://evil.example", **js) == 403
+    assert code("/api/review", nope, **{"Content-Type": "text/plain"}) == 415
+    assert code("/api/review", json.dumps({"id": item["id"], "status": "answered"}).encode(), **js) == 400  # not for a review
+    assert review.items()[0]["status"] == "open"
+    # attached media can't run as a page: nosniff, and anything but image/video/audio is a download
+    html = os.path.join(tmp, "x.html")
+    open(html, "w").write("<script>fetch('/api/review')</script>")
+    hi = run("add", "--title", "Has html", "--media", html, png).stdout.splitlines()[0]
+    r = urllib.request.urlopen(f"{base}/media/{os.path.basename(hi)}/x.html")
+    assert r.headers["X-Content-Type-Options"] == "nosniff" and r.headers["Content-Disposition"] == "attachment"
+    r = urllib.request.urlopen(f"{base}/media/{os.path.basename(hi)}/still.png")
+    assert r.headers["Content-Disposition"] is None
+    run("revoke", os.path.basename(hi))
     # the human answers on the page
     req = urllib.request.Request(base + "/api/review", json.dumps({"id": item["id"], "status": "redo", "note": "too faint"}).encode(),
                                  {"Content-Type": "application/json"})
@@ -119,7 +141,12 @@ def stop_after(text, active=False, sid="q2", transcript=None):
     return subprocess.run([sys.executable, CLI, "hook"], env=env, input=json.dumps(ev), capture_output=True, text=True).stdout
 
 
-# a turn that ends on a question asked in chat is pushed back once, never twice; a plain ending is left alone
+# a turn that ends on a question asked in chat is pushed back once, never twice; a plain ending is left alone.
+# Only in a session that has used the inbox: a session that never posted is never nagged.
+assert stop_after("Want it brighter, or keep it as is?", sid="fresh") == ""
+subprocess.run([sys.executable, CLI, "--session", "q2", "ask", "Warm-up?"], env=env, capture_output=True)
+subprocess.run([sys.executable, CLI, "hook"], env=env, capture_output=True, text=True,
+               input=json.dumps({"session_id": "q2", "hook_event_name": "UserPromptSubmit", "prompt": "sure"}))
 assert "review.py" in stop_after("Done with the trail. Want it brighter, or keep it as is?") and "ask" in stop_after("Which colour?")
 assert stop_after("Which colour?", active=True) == ""
 assert stop_after("Done: the trail is shorter now.") == ""
@@ -155,5 +182,30 @@ else:
 quick = subprocess.run([sys.executable, CLI, "--session", "c1", "wait"], env={**env, "REVIEW_INBOX_WARM_MIN": "5.01"},
                        capture_output=True, text=True, timeout=30)
 assert quick.returncode == 3, quick.stdout
+
+# a missing --media path fails before any folder exists; two posts with one title in one second both land
+before = set(os.listdir(tmp))
+r = run("add", "--title", "Typo", "--media", os.path.join(tmp, "nope.png"))
+assert r.returncode and "no such file" in r.stderr and set(os.listdir(tmp)) == before, r
+a1, _ = review.add("review", "Twin")
+a2, _ = review.add("review", "Twin")
+assert a1["id"] != a2["id"]
+# revoke and handled: only your own items, and a clean error for an unknown id
+r = run("--session", "someone-else", "revoke", a1["id"])
+assert r.returncode and "another session" in r.stderr and os.path.isdir(os.path.join(tmp, a1["id"])), r
+r = run("handled", "20000101-000000-nothing", "x")
+assert r.returncode and "no item" in r.stderr and "Traceback" not in r.stderr, r
+# the CLI handed to the agent names the inbox, so it finds the same one as the hooks wherever it runs
+assert f'--dir "{tmp}"' in hook("SessionStart")
+other = tempfile.mkdtemp()
+subprocess.run([sys.executable, CLI, "--dir", tmp, "--session", "d1", "add", "--title", "From elsewhere"], env={**ENV, "REVIEW_INBOX_DIR": other},
+               capture_output=True)
+assert any(i["title"] == "From elsewhere" for i in review.items()) and not os.listdir(other)
+# hook output is UTF-8 whatever the console code page: the human's note is the payload
+u, _ = review.add("review", "Unicode")
+review.answer(u["id"], "redo", "gör 日本 🙂")
+raw = subprocess.run([sys.executable, CLI, "hook"], env=ENV, capture_output=True,
+                     input=json.dumps({"session_id": "s1", "hook_event_name": "UserPromptSubmit"}).encode()).stdout
+assert "gör 日本 🙂" in raw.decode("utf-8"), raw
 
 print("selfcheck ok")

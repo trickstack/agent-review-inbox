@@ -45,15 +45,3 @@ prompt at a time:
 
 Answer on the inbox page (http://127.0.0.1:7700/). Press **Redo** with a note like "trail is too long, half it" and
 watch the agent pick the verdict up and post the next take on its own, then **OK** it.
-
-## Recording the README media
-
-One take of prompt 1 covers everything: post, notification, Redo with a note, retake, OK. Save each capture over the
-placeholder of the same name in `assets/`:
-
-| File | What to capture |
-|---|---|
-| `hero.webp` | The inbox with a few items waiting (a clip, a question, a still), the yellow "agent waiting" glow on each. Under ~10 MB. |
-| `step-1-post.png` … `step-4-ok.png` | The loop as four stills: an item arrives, a Redo note, the retake on top with another project's item below, OK. Same size each. |
-
-Also worth having: the Stop hook refusing to let the agent end its turn with an unread verdict.

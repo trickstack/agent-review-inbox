@@ -5,5 +5,7 @@
   "description": "A review inbox for agent work that needs human eyes: agents post clips and stills, you answer OK or Redo, and the verdict wakes the agent and must be acted on.",
   "author": { "name": "trickstack" },
   "license": "MIT",
+  "homepage": "https://github.com/trickstack/agent-review-inbox",
+  "repository": "https://github.com/trickstack/agent-review-inbox",
   "keywords": ["review", "human-in-the-loop", "gamedev", "hooks"]
 }

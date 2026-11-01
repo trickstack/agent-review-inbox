@@ -8,7 +8,7 @@
   <a href="https://ko-fi.com/trickstack"><img src="https://img.shields.io/badge/Support%20me%20on%20Ko--fi-FF5E5B?logo=ko-fi&logoColor=white" alt="Support me on Ko-fi"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license"></a>
   <a href="#install"><img src="https://img.shields.io/badge/Claude%20Code-plugin-D97757" alt="Claude Code plugin"></a>
-  <a href="docs/codex-test.md"><img src="https://img.shields.io/badge/Codex-untested-lightgrey" alt="Codex (untested)"></a>
+  <a href="docs/codex-test.md"><img src="https://img.shields.io/badge/Codex-experimental-lightgrey" alt="Codex (experimental)"></a>
 </p>
 
 <!-- HERO: the inbox with items from three projects waiting on you. Keep it under ~10 MB so GitHub plays it inline. -->
@@ -24,7 +24,7 @@ it can call the task done.
 It's for anything you judge by looking, listening or playing: a UI change, an animation, a particle effect, game feel, a
 sound.
 
-A plugin for **Claude Code** and **Codex**: one Python file (stdlib only), one HTML page, three hooks and a skill.
+A plugin for **Claude Code** (Codex: experimental): one Python file (stdlib only), one HTML page, three hooks and a skill.
 The CLI works with any agent that can run a shell command.
 
 ## Why
@@ -37,8 +37,9 @@ one place and closes the loop:
    itself, and posts it with what to look at.
 2. **Notify.** A desktop notification pops up; clicking it opens the inbox page.
 3. **Verdict.** You watch, then press OK or Redo, with a note and, if you like, a pasted, marked-up screenshot.
-4. **Act.** The agent was waiting in the background, cheaply: `wait` gives up before the session's prompt cache goes cold,
-   so it never costs a full context re-read. The verdict arrives with your next prompt instead.
+4. **Act.** The agent was waiting in the background, cheaply: `wait` gives up before the session's prompt cache goes cold
+   (it assumes a one-hour cache; with a shorter one, lower `REVIEW_INBOX_WARM_MIN`), so waiting doesn't cost a full
+   context re-read. The verdict arrives with your next prompt instead.
 5. **Stay honest.** The Stop hook won't let the agent end its turn while it has an unread verdict, an unanswered Redo or OK,
    or an open item with nothing waiting for the answer.
 
@@ -82,7 +83,7 @@ codex plugin marketplace add trickstack/agent-review-inbox
 ```
 
 Then install it from `/plugins` in `codex`, start a new session, and trust its three hooks in `/hooks` (Codex skips
-plugin hooks until you do). Codex support is new; see [docs/codex-test.md](docs/codex-test.md).
+plugin hooks until you do). Codex support is experimental: nobody has run it end to end yet. See [docs/codex-test.md](docs/codex-test.md).
 
 **Any other agent**
 
@@ -148,6 +149,11 @@ export REVIEW_INBOX_CLIP_CMD='my-recorder --last {seconds} --out "{out}"'
 | `REVIEW_INBOX_WARM_MIN` | `50` | idle minutes after which a prompt cache counts as cold |
 | `REVIEW_INBOX_CLIP_CMD` | | custom capture command |
 | `REVIEW_INBOX_NO_TOAST` | | no desktop notifications |
+| `REVIEW_INBOX_NO_SERVER` | | `add` doesn't start the page server (run `review.py serve` yourself) |
+| `REVIEW_INBOX_SESSION` | | the session id for agents without `CLAUDE_CODE_SESSION_ID` (same as `--session`) |
+| `REVIEW_INBOX_BY` | | default `--by` label on posts |
+| `REVIEW_INBOX_BEAT_S` | `5` | how often `wait` checks for an answer |
+| `REVIEW_INBOX_AVF_INPUT` | `1:none` | macOS: the avfoundation device to record |
 
 Notifications: Windows toast (click opens the page), macOS Notification Center, Linux `notify-send`, otherwise none.
 

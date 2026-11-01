@@ -6,6 +6,8 @@
     "name": "trickstack"
   },
   "license": "MIT",
+  "homepage": "https://github.com/trickstack/agent-review-inbox",
+  "repository": "https://github.com/trickstack/agent-review-inbox",
   "keywords": [
     "review",
     "human-in-the-loop",

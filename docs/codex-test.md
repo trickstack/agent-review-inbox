@@ -10,7 +10,7 @@ so the agent can record clips of the demo game.
 ## 1. Install
 
 ```bash
-git clone <repo url> agent-review-inbox
+git clone https://github.com/trickstack/agent-review-inbox agent-review-inbox
 codex plugin marketplace add ./agent-review-inbox
 ```
 
