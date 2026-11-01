@@ -90,6 +90,59 @@ assert next(i for i in review.items() if i["title"] == "Codex take")["sid"] == "
 stop = subprocess.run([sys.executable, CLI, "hook"], env=env, input=json.dumps({"session_id": "c1", "hook_event_name": "Stop"}),
                       capture_output=True, text=True).stdout
 assert "nothing waiting" in stop and "--session c1 wait" in stop, stop
+# a question: options on the page, the answer comes back through `wait` like a verdict
+q = subprocess.run([sys.executable, CLI, "--session", "q1", "ask", "Red or blue paddle?", "--options", "Red", "Blue"], env=env,
+                   capture_output=True, text=True).stdout
+qi = next(i for i in review.items() if i["title"] == "Red or blue paddle?")
+assert qi["kind"] == "question" and qi["options"] == ["Red", "Blue"] and qi["sid"] == "q1", q
+qw = subprocess.Popen([sys.executable, CLI, "--session", "q1", "wait"], env=env, stdout=subprocess.PIPE, text=True)
+time.sleep(1.5)
+review.answer(qi["id"], "answered", "Blue")
+got, _ = qw.communicate(timeout=10)
+assert qw.returncode == 0 and 'ANSWER to your question "Red or blue paddle?"' in got and "Blue" in got, got
+
+
+def stop_after(text, active=False, sid="q2", transcript=None):
+    ev = {"session_id": sid, "hook_event_name": "Stop", "stop_hook_active": active}
+    if transcript:
+        ev["transcript_path"] = transcript
+    else:
+        ev["last_assistant_message"] = text
+    return subprocess.run([sys.executable, CLI, "hook"], env=env, input=json.dumps(ev), capture_output=True, text=True).stdout
+
+
+# a turn that ends on a question asked in chat is pushed back once, never twice; a plain ending is left alone
+assert "review.py" in stop_after("Done with the trail. Want it brighter, or keep it as is?") and "ask" in stop_after("Which colour?")
+assert stop_after("Which colour?", active=True) == ""
+assert stop_after("Done: the trail is shorter now.") == ""
+tr = os.path.join(tmp, "t.jsonl")
+with open(tr, "w") as f:
+    f.write(json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": "Should I also add particles?"}]}}) + "\n")
+assert "ask" in stop_after("", transcript=tr)
+assert stop_after("", transcript=os.path.join(tmp, "missing.jsonl")) == ""  # fails open
+
+# scripted steps: ';' splits --do, a --script splits on lines only (so a typed ';' survives), bad steps fail fast
+assert review.parse_steps("click text=Save; type hi there ;key Control+S; wait 300") == [
+    ("click", "text=Save"), ("type", "hi there"), ("key", "Control+S"), ("wait", "300")]
+assert review.parse_steps("type a; b\n# note\nclick 10, 20", "\n") == [("type", "a; b"), ("click", "10, 20")]
+assert review.xy("10, 20") == (10, 20) and review.xy("#save") is None
+for bad in ("jump 3", "click"):
+    try:
+        review.parse_steps(bad)
+        raise AssertionError(bad)
+    except SystemExit:
+        pass
+
+# doctor: exit 0 with everything present, 1 with something missing; each missing tool says what it disables and how to install
+r = subprocess.run([sys.executable, CLI, "doctor"], env=env, capture_output=True, text=True)
+lines = r.stdout.splitlines()
+assert r.returncode in (0, 1) and lines, r
+if r.returncode:
+    assert lines[-1].endswith("the rest of the inbox works without them")
+    assert sum(l.startswith("missing  ") for l in lines) == len([l for l in lines if l.startswith("         install:  ")]) > 0
+else:
+    assert lines == ["all capture tools present"]
+
 # no transcript to read: `wait` still gives up before the cache would go cold, timed from when it began
 quick = subprocess.run([sys.executable, CLI, "--session", "c1", "wait"], env={**env, "REVIEW_INBOX_WARM_MIN": "5.01"},
                        capture_output=True, text=True, timeout=30)

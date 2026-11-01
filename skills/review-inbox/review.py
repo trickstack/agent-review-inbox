@@ -1,25 +1,33 @@
 """Review inbox: everything an agent made that waits on a human's eyes, ears or hands, in one place.
 
-    review.py add --title "Ball trail" --how "Open the game, watch the ball" [--topic juice] [--media a.png b.mp4] [--kind bug]
+    review.py add --title "Ball trail" --how "Open the game, watch the ball" [--topic juice] [--media a.png b.mp4]
     review.py clip 6 --url http://localhost:8080/   record a page for 6 s (Playwright) -> draft clip.mp4 + clip_sheet.jpg
     review.py clip 6 [--window "My Game"]           record the screen / a window for 6 s (ffmpeg)
-    review.py shot --url http://localhost:8080/     still of a page (Playwright) -> draft shot.png
+    review.py clip --url ... --do "click text=Save; type hi; key Enter"   film an interaction (steps below)
+    review.py shot [--url ... | --window "My Game"] still of a page (Playwright) or a window / the screen -> draft shot.png
+    review.py doctor                optional capture tools: what's missing, what it disables, the install command
+    review.py ask "Red or blue paddle?" [--options Red Blue]   a question for the human: answered on the page like a verdict
     review.py list [--open] [--topic juice]
     review.py wait [<id>]           (background) exits when the human answers -> wakes the agent; no id = every open item
                                     this session posted. Gives up (exit 3) before the session's prompt cache goes cold.
     review.py handled <id> "<what>" the verdict is dealt with without a new item ("committed abc123", or why you stopped)
     review.py revoke <id>           take your own unanswered item down (e.g. before posting a retake)
-    review.py dismiss <id> "<note>" close an open item (a bug) your work fixed
+    review.py dismiss <id> "<note>" close an open item that no longer needs an answer (superseded, already fixed)
     review.py serve                 the review page (also started on demand by `add`)
     review.py hook                  Claude Code hook (SessionStart, UserPromptSubmit, Stop): hands a session its verdicts
 
 Storage: one folder per item in <project>/.review-inbox/<id>/ (item.json + media), so parallel sessions never write the
-same file. Status: open -> ok | redo | dismissed (a bug stays open once the human describes it: that's the agent's cue).
+same file. Status: open -> ok | redo | dismissed, or open -> answered for a question (`ask`).
 Items remember the posting session (CLAUDE_CODE_SESSION_ID in Claude Code; --session or REVIEW_INBOX_SESSION elsewhere,
 which the SessionStart hook hands the agent); the hook hands that session its verdicts, with the next
 prompt or by blocking the end of a turn until it has read and acted on them.
 
 Environment: REVIEW_INBOX_DIR (default <project>/.review-inbox), REVIEW_INBOX_PORT (7700), REVIEW_INBOX_HOST (127.0.0.1),
+Steps (--do "a; b; c", or --script <file> with one per line): click <target>, dblclick <target>, move <target>,
+type <text>, key <combo>, scroll <dy>, wait <ms>. A target is a Playwright selector on a page (text=Save, #email) or x,y:
+on a page in viewport pixels, on the desktop relative to the --window's top-left (pick them from `shot --window`), else
+the screen. Desktop steps need pyautogui; the cursor glides to each target so the viewer sees what was clicked.
+
 REVIEW_INBOX_WARM_MIN (50: idle minutes before a prompt cache counts as cold), REVIEW_INBOX_CLIP_CMD (custom capture
 command, {out} and {seconds} are filled in), REVIEW_INBOX_NO_TOAST, REVIEW_INBOX_NO_SERVER.
 """
@@ -33,7 +41,7 @@ PORT = int(os.environ.get("REVIEW_INBOX_PORT") or 7700)
 PAGE = f"http://127.0.0.1:{PORT}/"
 WARM_MIN = float(os.environ.get("REVIEW_INBOX_WARM_MIN") or 50)
 BEAT_S = float(os.environ.get("REVIEW_INBOX_BEAT_S") or 5)  # `wait` polls and touches its waiting.json this often
-STATUSES = ("open", "ok", "redo", "dismissed")
+STATUSES = ("open", "ok", "redo", "dismissed", "answered")
 IMAGE_EXT = {"image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp"}
 
 
@@ -54,7 +62,7 @@ DIR = inbox_dir()
 
 # ---------------------------------------------------------------- store
 
-def add(kind, title, topic="", how="", media=(), by=""):
+def add(kind, title, topic="", how="", media=(), by="", options=None):
     slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:40]
     d = os.path.join(DIR, time.strftime("%Y%m%d-%H%M%S-") + slug)
     os.makedirs(d)
@@ -74,6 +82,8 @@ def add(kind, title, topic="", how="", media=(), by=""):
     item = dict(id=os.path.basename(d), kind=kind, title=title, topic=topic, how=how, by=by,
                 sid=SID,  # the poster: `hook` hands the verdict to this session
                 media=names, created=time.strftime("%Y-%m-%d %H:%M"), status="open", note="")
+    if options is not None:  # a question's one-click answers, written with the item so the page never sees it without them
+        item["options"] = options
     save(item)
     return item, d
 
@@ -183,6 +193,134 @@ def sheet(mp4, out_dir, seconds):
                     "-frames:v", "1", "-update", "1", os.path.join(out_dir, "clip_sheet.jpg")])
 
 
+STEP_VERBS = ("click", "dblclick", "move", "type", "key", "scroll", "wait")
+LEAD_MS = 500  # before the first step and after the last, so the moment isn't cut off
+
+
+def parse_steps(text, sep=";"):
+    """'click text=Save; type hi' -> [("click", "text=Save"), ("type", "hi")]. --script files split on lines only, so a
+    typed ';' survives there."""
+    steps = []
+    for raw in text.split(sep):
+        raw = raw.strip()
+        if not raw or raw.startswith("#"):
+            continue
+        verb, _, arg = raw.partition(" ")
+        if verb not in STEP_VERBS:
+            raise SystemExit(f"unknown step {verb!r} in {raw!r}; steps: {', '.join(STEP_VERBS)}")
+        if verb != "type":
+            arg = arg.strip()
+        if not arg:
+            raise SystemExit(f"step {raw!r} needs an argument")
+        steps.append((verb, arg))
+    return steps
+
+
+def xy(target):
+    m = re.fullmatch(r"\s*(-?\d+)\s*,\s*(-?\d+)\s*", target)
+    return (int(m[1]), int(m[2])) if m else None
+
+
+# headless Chromium draws no cursor: a dot that follows the mouse and pulses on click
+CURSOR_JS = """addEventListener('DOMContentLoaded', () => {
+  const d = document.createElement('div');
+  d.style.cssText = 'position:fixed;z-index:2147483647;pointer-events:none;width:22px;height:22px;margin:-11px 0 0 -11px;' +
+    'border-radius:50%;background:rgba(255,255,255,.55);border:2px solid #111;box-shadow:0 0 0 2px #fff;left:-50px;top:-50px;transition:transform .12s';
+  document.documentElement.appendChild(d);
+  addEventListener('mousemove', e => { d.style.left = e.clientX + 'px'; d.style.top = e.clientY + 'px'; }, true);
+  addEventListener('mousedown', () => d.style.transform = 'scale(.6)', true);
+  addEventListener('mouseup', () => d.style.transform = '', true);
+});"""
+
+
+def web_steps(page, steps):
+    def at(target):
+        if xy(target):
+            return xy(target)
+        try:
+            box = page.locator(target).first.bounding_box(timeout=5000)
+        except Exception:  # Playwright's TimeoutError: say which step, not 30 lines of stack
+            box = None
+        if not box:
+            raise SystemExit(f"nothing visible matches {target!r}")
+        return box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+    for verb, arg in steps:
+        if verb in ("click", "dblclick", "move"):
+            page.mouse.move(*at(arg), steps=20)
+            page.wait_for_timeout(150)
+            if verb == "click":
+                page.mouse.click(*at(arg))
+            elif verb == "dblclick":
+                page.mouse.dblclick(*at(arg))
+        elif verb == "type":
+            page.keyboard.type(arg, delay=60)
+        elif verb == "key":
+            page.keyboard.press(arg)
+        elif verb == "scroll":
+            page.mouse.wheel(0, int(arg))
+        elif verb == "wait":
+            page.wait_for_timeout(int(arg))
+        page.wait_for_timeout(250)
+
+
+def win_origin(window):
+    """Screen position of a window's client area (what gdigrab records), brought to the front. (0, 0) without a window."""
+    if not window:
+        return 0, 0
+    if os.name != "nt":
+        raise SystemExit("--window works on Windows; elsewhere steps use screen coordinates")
+    import ctypes, ctypes.wintypes as wt
+    user32 = ctypes.windll.user32
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)  # physical pixels, like ffmpeg
+    except (AttributeError, OSError):
+        pass
+    h = user32.FindWindowW(None, window)
+    if not h:
+        raise SystemExit(f"no window titled exactly {window!r}")
+    user32.ShowWindow(h, 9)  # SW_RESTORE
+    user32.keybd_event(0x12, 0, 0, 0)  # a tap of Alt lets SetForegroundWindow through Windows' focus-steal guard
+    user32.keybd_event(0x12, 0, 2, 0)
+    user32.SetForegroundWindow(h)
+    pt = wt.POINT(0, 0)
+    user32.ClientToScreen(h, ctypes.byref(pt))
+    return pt.x, pt.y
+
+
+def desktop_steps(steps, origin):
+    try:
+        import pyautogui
+    except ImportError:
+        raise SystemExit("desktop steps need pyautogui: pip install pyautogui")
+    pyautogui.PAUSE = 0.25
+    for verb, arg in steps:
+        if verb in ("click", "dblclick", "move"):
+            if not xy(arg):
+                raise SystemExit(f"desktop targets are x,y (from `shot --window`), not {arg!r}")
+            x, y = xy(arg)
+            pyautogui.moveTo(origin[0] + x, origin[1] + y, duration=0.5, tween=pyautogui.easeInOutQuad)
+            if verb == "click":
+                pyautogui.click()
+            elif verb == "dblclick":
+                pyautogui.doubleClick()
+        elif verb == "type":
+            pyautogui.write(arg, interval=0.06)
+        elif verb == "key":
+            pyautogui.hotkey(*[k.strip().lower() for k in arg.split("+")])
+        elif verb == "scroll":
+            pyautogui.scroll(-int(arg))  # positive dy scrolls down, as on the web
+        elif verb == "wait":
+            time.sleep(int(arg) / 1000)
+
+
+def screen_src(window):
+    if os.name == "nt":
+        return ["-f", "gdigrab", "-framerate", "30", "-i", f"title={window}" if window else "desktop"]
+    if sys.platform == "darwin":  # list devices: ffmpeg -f avfoundation -list_devices true -i ""
+        return ["-f", "avfoundation", "-framerate", "30", "-i", os.environ.get("REVIEW_INBOX_AVF_INPUT", "1:none")]
+    return ["-f", "x11grab", "-framerate", "30", "-i", os.environ.get("DISPLAY", ":0")]
+
+
 def playwright_page(url, fn, video_dir=None, size=(1280, 720)):
     try:
         from playwright.sync_api import sync_playwright
@@ -194,6 +332,7 @@ def playwright_page(url, fn, video_dir=None, size=(1280, 720)):
         if video_dir:
             opts.update(record_video_dir=video_dir, record_video_size=opts["viewport"])
         ctx = browser.new_context(**opts)
+        ctx.add_init_script(CURSOR_JS)
         page = ctx.new_page()
         page.goto(url)
         fn(page)
@@ -203,14 +342,19 @@ def playwright_page(url, fn, video_dir=None, size=(1280, 720)):
         return video.path() if video else None
 
 
-def clip(out_dir, seconds, url="", window=""):
-    """Record `seconds` -> out_dir/clip.mp4 (+ clip_sheet.jpg). Providers: REVIEW_INBOX_CLIP_CMD, a page (Playwright), or the
-    screen / a window (ffmpeg). Returns the media names made."""
+def clip(out_dir, seconds, url="", window="", steps=()):
+    """Record `seconds` (with steps: until they're done, and at least `seconds`) -> out_dir/clip.mp4 (+ clip_sheet.jpg).
+    Providers: REVIEW_INBOX_CLIP_CMD, a page (Playwright), or the screen / a window (ffmpeg). Returns the media names made."""
     mp4 = os.path.join(out_dir, "clip.mp4")
-    if os.environ.get("REVIEW_INBOX_CLIP_CMD"):  # any recorder you like: a replay buffer, an engine's own capture, ...
+    if os.environ.get("REVIEW_INBOX_CLIP_CMD") and not steps:  # any recorder you like: a replay buffer, an engine's own capture
         subprocess.run(os.environ["REVIEW_INBOX_CLIP_CMD"].format(out=mp4, seconds=seconds), shell=True)
     elif url:
-        webm = playwright_page(url, lambda page: page.wait_for_timeout(seconds * 1000), video_dir=out_dir)
+        def film(page):
+            t = time.time()
+            page.wait_for_timeout(LEAD_MS)
+            web_steps(page, steps)
+            page.wait_for_timeout(max(LEAD_MS, seconds * 1000 - (time.time() - t) * 1000))
+        webm = playwright_page(url, film, video_dir=out_dir)
         if ffmpeg():
             subprocess.run([ffmpeg(), "-v", "error", "-y", "-i", webm, "-c:v", "libx264", "-pix_fmt", "yuv420p",
                             "-movflags", "+faststart", mp4])
@@ -220,17 +364,91 @@ def clip(out_dir, seconds, url="", window=""):
     else:
         if not ffmpeg():
             raise SystemExit("needs ffmpeg on PATH (or set REVIEW_INBOX_CLIP_CMD)")
-        if os.name == "nt":
-            src = ["-f", "gdigrab", "-framerate", "30", "-i", f"title={window}" if window else "desktop"]
-        elif sys.platform == "darwin":  # list devices: ffmpeg -f avfoundation -list_devices true -i ""
-            src = ["-f", "avfoundation", "-framerate", "30", "-i", os.environ.get("REVIEW_INBOX_AVF_INPUT", "1:none")]
+        enc = ["-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-movflags", "+faststart", mp4]
+        if not steps:
+            subprocess.run([ffmpeg(), "-v", "error", "-y", *screen_src(window), "-t", str(seconds), *enc])
         else:
-            src = ["-f", "x11grab", "-framerate", "30", "-i", os.environ.get("DISPLAY", ":0")]
-        subprocess.run([ffmpeg(), "-v", "error", "-y", *src, "-t", str(seconds), "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
-                        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-movflags", "+faststart", mp4])
+            origin = win_origin(window)  # focus first, so the recording opens on the window in front
+            time.sleep(0.3)
+            rec = subprocess.Popen([ffmpeg(), "-v", "error", "-y", *screen_src(window), "-t", "300", *enc], stdin=subprocess.PIPE)
+            t = time.time()
+            try:
+                time.sleep(0.4 + LEAD_MS / 1000)  # ffmpeg takes a moment to start grabbing
+                desktop_steps(steps, origin)
+                time.sleep(max(LEAD_MS / 1000, seconds - (time.time() - t)))
+            finally:
+                try:
+                    rec.communicate(b"q", timeout=20)  # 'q' lets ffmpeg finish the mp4; a kill leaves it unplayable
+                except subprocess.TimeoutExpired:
+                    rec.kill()
     if os.path.exists(mp4) and ffmpeg():
-        sheet(mp4, out_dir, seconds)
+        sheet(mp4, out_dir, duration(mp4) or seconds)
     return [m for m in ("clip.mp4", "clip.webm", "clip_sheet.jpg") if os.path.exists(os.path.join(out_dir, m))]
+
+
+def duration(mp4):
+    r = subprocess.run([ffmpeg(), "-i", mp4], capture_output=True, text=True)
+    m = re.search(r"Duration: (\d+):(\d+):([\d.]+)", r.stderr)
+    return int(m[1]) * 3600 + int(m[2]) * 60 + float(m[3]) if m else 0
+
+
+def shot(png, url="", window="", steps=()):
+    if url:
+        return playwright_page(url, lambda page: (page.wait_for_timeout(1000), web_steps(page, steps),
+                                                  page.wait_for_timeout(300), page.screenshot(path=png)))
+    if not ffmpeg():
+        raise SystemExit("needs ffmpeg on PATH (see `review.py doctor`)")
+    if steps:
+        desktop_steps(steps, win_origin(window))
+        time.sleep(0.3)
+    elif window:
+        win_origin(window)
+        time.sleep(0.3)
+    subprocess.run([ffmpeg(), "-v", "error", "-y", *screen_src(window), "-frames:v", "1", "-update", "1", png])
+
+
+# ---------------------------------------------------------------- doctor
+
+def doctor():
+    """Optional capture tools: [(what, disables, fix)] for each one missing. Fast (no imports, no browser launch): it runs at
+    every session start."""
+    import importlib.util
+    has = lambda mod: importlib.util.find_spec(mod) is not None
+    mac, linux = sys.platform == "darwin", sys.platform.startswith("linux")
+    pip = f'"{sys.executable}" -m pip install'
+    out = []
+    if sys.version_info < (3, 9):
+        out.append(("Python 3.9+", "everything", "install a newer Python"))
+    if not ffmpeg():
+        out.append(("ffmpeg", "screen and window recording, contact sheets, mp4 from page clips",
+                    "brew install ffmpeg" if mac else "sudo apt install ffmpeg" if linux else "winget install Gyan.FFmpeg"))
+    if not has("playwright"):
+        out.append(("playwright", "clips and stills of web pages", f"{pip} playwright && playwright install chromium"))
+    else:
+        home = os.environ.get("PLAYWRIGHT_BROWSERS_PATH") or os.path.expanduser(
+            "~/Library/Caches/ms-playwright" if mac else "~/.cache/ms-playwright" if linux
+            else os.path.join(os.environ.get("LOCALAPPDATA", ""), "ms-playwright"))
+        if not glob.glob(os.path.join(home, "chromium*")):
+            out.append(("Playwright's Chromium", "clips and stills of web pages", f'"{sys.executable}" -m playwright install chromium'))
+    if not has("pyautogui"):
+        out.append(("pyautogui", "scripted steps (--do) on desktop apps", f"{pip} pyautogui"))
+    if mac:
+        try:
+            import ctypes, ctypes.util
+            cg = ctypes.cdll.LoadLibrary(ctypes.util.find_library("CoreGraphics"))
+            if not cg.CGPreflightScreenCaptureAccess():
+                out.append(("Screen Recording permission", "screen and window recording",
+                            "System Settings > Privacy & Security > Screen Recording: allow your terminal / agent app"))
+            ax = ctypes.cdll.LoadLibrary(ctypes.util.find_library("ApplicationServices"))
+            if not ax.AXIsProcessTrusted():
+                out.append(("Accessibility permission", "scripted steps (--do) on desktop apps",
+                            "System Settings > Privacy & Security > Accessibility: allow your terminal / agent app"))
+        except (OSError, AttributeError):
+            pass
+    if linux and (os.environ.get("XDG_SESSION_TYPE") == "wayland" or os.environ.get("WAYLAND_DISPLAY")):
+        out.append(("an X11 session", "screen recording and desktop steps (x11grab and pyautogui need X11; Wayland is not supported)",
+                    "log in to an X11 / Xorg session, or film web pages with --url"))
+    return out
 
 
 def draft_dir():
@@ -293,11 +511,14 @@ def cli(sid):
 
 
 def act(sid):
-    return ("The human answered your review item(s) in the review inbox. This is work, not a notification: REDO = rework it and post "
-            f"the next take now; OK = finish it (commit if your project's rules say so), then `{cli(sid)} handled <id> \"committed <hash>\"`.\n")
+    return ("The human answered in the review inbox. This is work, not a notification: REDO = rework it and post the next take now; "
+            f"OK = finish it (commit if your project's rules say so), then `{cli(sid)} handled <id> \"committed <hash>\"`; "
+            "an answer to your question = carry on with it.\n")
 
 
 def verdict(item):
+    if item.get("kind") == "question":
+        return f"ANSWER to your question \"{item['title']}\" ({item['id']}): {item['note'] or '(no text)'}" + reply_paths(item)
     return (f"ANSWERED {item['status'].upper()}: {item['title']} ({item['id']})" + (f"\nnote: {item['note']}" if item["note"] else "")
             + reply_paths(item))
 
@@ -395,6 +616,13 @@ def hook():
     if name == "SessionStart":
         print(f"This project has a review inbox ({PAGE}). When you finish something a human has to judge by eye, ear or feel "
               f"(UI, visuals, animation, motion, sound, copy), post it there instead of asking in chat: see the review-inbox skill. CLI (use exactly this, it carries your session): {cli(sid)}")
+        try:
+            missing = doctor()
+        except Exception:
+            missing = []
+        if missing:
+            print("Review inbox capture tools missing (offer to install them): " + "; ".join(
+                f"{w} (disables {d}): {f}" for w, d, f in missing) + f". Details: {cli(sid)} doctor")
         return
     stop = name == "Stop"
     found = undelivered(sid)
@@ -408,12 +636,48 @@ def hook():
             print(json.dumps({"decision": "block", "reason": "You haven't acted on the human's verdict yet:\n" + "\n".join(verdict(i) for i in todo)
                               + f"\nREDO: rework it and post the next take (`{cli(sid)} add`). OK: finish it, then `{cli(sid)} handled <id> "
                               "\"committed <hash>\"`. Only if you truly can't go on alone (you need the human's answer): "
-                              f"`{cli(sid)} handled <id> \"<why>\"` and ask them."}))
+                              f"`{cli(sid)} handled <id> \"<why>\"`, then post your question with `{cli(sid)} ask` and run `wait`."}))
             return
         idle = [i["id"] for i in mine(sid) if not i.get("answered") and not waiting(i["id"]) and marked(i["id"], "gaveup") is None]
         if idle:
             print(json.dumps({"decision": "block", "reason": f"Open review item(s) {', '.join(idle)} with nothing waiting for the answer: "
                               f"run `{cli(sid)} wait` as a background command (run_in_background), then end your turn."}))
+            return
+        # the human steers through the inbox and misses questions asked in chat: catch a turn that ends on one, once
+        if not any(not i.get("answered") for i in mine(sid)) and asks_human(last_message(ev)):
+            print(json.dumps({"decision": "block", "reason": f"If that's a question for the human, post it with `{cli(sid)} ask \"<question>\" "
+                              "[--options A B ...]` and run `wait` as a background command; otherwise just end your turn."}))
+
+
+def last_message(ev):
+    """The agent's last reply: from the hook input (Codex) or the tail of the transcript (Claude Code). '' when unknown."""
+    if ev.get("last_assistant_message"):
+        return ev["last_assistant_message"]
+    try:
+        with open(ev.get("transcript_path") or "", "rb") as f:
+            f.seek(max(0, os.path.getsize(f.name) - 262144))
+            lines = f.read().decode("utf-8", "replace").splitlines()
+    except OSError:
+        return ""
+    for line in reversed(lines):
+        try:
+            e = json.loads(line)
+        except ValueError:
+            continue
+        if e.get("type") == "assistant":
+            content = (e.get("message") or {}).get("content")
+            text = content if isinstance(content, str) else "".join(c.get("text", "") for c in content or [] if isinstance(c, dict))
+            if text.strip():
+                return text
+    return ""
+
+
+def asks_human(text):
+    """Does a reply end on a question to the human: its last paragraph ends with '?', or asks one while offering choices."""
+    tail = text.strip().split("\n\n")[-1].strip()
+    if tail.rstrip(" *_`)\"'").endswith("?"):
+        return True
+    return "?" in tail and re.search(r"(?i)\b(option|which|would you like|do you want|should i|shall i|prefer|or)\b", tail) is not None
 
 
 # ---------------------------------------------------------------- the page
@@ -511,12 +775,20 @@ if __name__ == "__main__":
     a.add_argument("--how", default="", help="what to look at and how to get there")
     a.add_argument("--media", nargs="*", default=[])
     a.add_argument("--by", default=os.environ.get("REVIEW_INBOX_BY", ""))
-    a.add_argument("--kind", default="review", choices=("review", "bug"))
     c = sub.add_parser("clip")
-    c.add_argument("seconds", type=int)
-    c.add_argument("--url", default="", help="record this page with Playwright instead of the screen")
-    c.add_argument("--window", default="", help="Windows: record only the window with this title")
-    sub.add_parser("shot").add_argument("--url", required=True)
+    c.add_argument("seconds", type=int, nargs="?", default=0, help="length; with steps, the minimum")
+    sh = sub.add_parser("shot")
+    for x in (c, sh):
+        x.add_argument("--url", default="", help="a page (Playwright) instead of the screen")
+        x.add_argument("--window", default="", help="Windows: only the window with exactly this title")
+        x.add_argument("--do", default="", help='steps, e.g. "click text=Save; type hello; key Enter"')
+        x.add_argument("--script", default="", help="a file of steps, one per line")
+    sub.add_parser("doctor")
+    q = sub.add_parser("ask")
+    q.add_argument("question")
+    q.add_argument("--options", nargs="*", default=[], help="one-click answers shown on the page")
+    q.add_argument("--topic", default="")
+    q.add_argument("--by", default=os.environ.get("REVIEW_INBOX_BY", ""))
     l = sub.add_parser("list")
     l.add_argument("--open", action="store_true")
     l.add_argument("--topic")
@@ -532,26 +804,46 @@ if __name__ == "__main__":
     h_.add_argument("what", help='"committed <hash>", or why you are stopping (and ask the human)')
     args = ap.parse_args()
     SID = args.session or SID
+    steps = [] if args.cmd not in ("clip", "shot") else (
+        parse_steps(args.do) + (parse_steps(open(args.script, encoding="utf-8").read(), "\n") if args.script else []))
     if args.cmd == "add":
-        item, d = add(args.kind, args.title, args.topic, args.how, args.media, args.by)
+        item, d = add("review", args.title, args.topic, args.how, args.media, args.by)
         ensure_server()
         toast("Review: " + args.title, (f"{args.by}: " if args.by else "") + (args.how or args.topic))
         print(d)
         print("media:", ", ".join(item["media"]) or "none")
         print(f"Page: {PAGE}\nWake on the answer: run `{cli(SID)} wait` as a background command (run_in_background).")
     elif args.cmd == "clip":
+        if not args.seconds and not steps:
+            sys.exit("give a length in seconds, or steps (--do / --script)")
         d = draft_dir()
-        media = clip(d, args.seconds, args.url, args.window)
+        media = clip(d, args.seconds, args.url, args.window, steps)
         if not media:
             sys.exit("no clip was made")
         print("made:", ", ".join(os.path.join(d, m) for m in media))
         if "clip_sheet.jpg" in media:
             print(f"Read {os.path.join(d, 'clip_sheet.jpg')} first; if it shows the moment, post with --media {os.path.join(d, media[0])}")
+    elif args.cmd == "ask":
+        item, d = add("question", args.question, args.topic, by=args.by, options=args.options)
+        ensure_server()
+        toast("Question: " + args.question, (f"{args.by}: " if args.by else "") + " / ".join(args.options))
+        print(d)
+        print(f"Page: {PAGE}\nWake on the answer: run `{cli(SID)} wait` as a background command (run_in_background).")
     elif args.cmd == "shot":
         d = draft_dir()
         png = os.path.join(d, "shot.png")
-        playwright_page(args.url, lambda page: (page.wait_for_timeout(1000), page.screenshot(path=png)))
+        shot(png, args.url, args.window, steps)
+        if not os.path.exists(png):
+            sys.exit("no still was made")
         print(f"Read {png} first; if it shows what you claim, post with --media {png}")
+        if args.window:
+            print("Desktop step targets are x,y pixels in this image (from its top-left).")
+    elif args.cmd == "doctor":
+        missing = doctor()
+        for w, d, f in missing:
+            print(f"missing  {w}\n         disables: {d}\n         install:  {f}")
+        print("all capture tools present" if not missing else f"{len(missing)} missing; the rest of the inbox works without them")
+        sys.exit(1 if missing else 0)
     elif args.cmd == "wait":
         sys.exit(wait(args.id))
     elif args.cmd == "hook":
