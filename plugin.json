@@ -2,7 +2,7 @@
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "agent-review-inbox",
   "version": "0.1.0",
-  "description": "A review inbox for agent work that needs a human's eyes: agents post clips and stills, you answer OK or Redo, and the verdict wakes the agent and must be acted on.",
+  "description": "A review inbox for agent work that needs human eyes: agents post clips and stills, you answer OK or Redo, and the verdict wakes the agent and must be acted on.",
   "author": { "name": "trickstack" },
   "license": "MIT",
   "keywords": ["review", "human-in-the-loop", "gamedev", "hooks"]

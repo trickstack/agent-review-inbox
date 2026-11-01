@@ -1,6 +1,6 @@
 {
   "name": "agent-review-inbox",
-  "description": "A review inbox for agent work that needs a human's eyes.",
+  "description": "A review inbox for agent work that needs human eyes.",
   "owner": {
     "name": "trickstack"
   },
@@ -8,7 +8,7 @@
     {
       "name": "agent-review-inbox",
       "source": "./",
-      "description": "A review inbox for agent work that needs a human's eyes."
+      "description": "A review inbox for agent work that needs human eyes."
     }
   ]
 }

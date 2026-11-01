@@ -1,6 +1,6 @@
 # Demo: Brickfall
 
-A deliberately plain brick breaker (flat grey boxes, no effects, no sound). It's the canvas for showing the review loop:
+A small neon brick breaker with no motion juice yet (no trail, particles, shake or sound). It's the canvas for showing the review loop:
 an agent adds game feel one change at a time and posts each change to the inbox, and you answer OK or Redo.
 
 ## Run it
@@ -41,7 +41,7 @@ prompt at a time:
    the review inbox for me."
 2. "Bricks should burst into a few particles when they break, and the screen should shake a little. Post both as
    separate takes in one item."
-3. "Colour the brick rows warm to cool from the top and post a still."
+3. "Make the paddle squash and stretch when the ball hits it, and record a clip."
 
 Answer on the inbox page (http://127.0.0.1:7700/). Press **Redo** with a note like "trail is too long, half it" and
 watch the agent pick the verdict up and post the next take on its own, then **OK** it.
@@ -53,11 +53,7 @@ placeholder of the same name in `assets/`:
 
 | File | What to capture |
 |---|---|
-| `hero.gif` | The whole loop in ~15 s: agent posts, notification, Redo with a note, retake arrives, OK. Under ~10 MB. |
-| `toast.png` | The desktop notification as the agent posts (crop to the notification). |
-| `inbox.png` | The inbox page with the item, ideally with the yellow "agent waiting" glow. |
-| `redo.gif` | Typing a Redo note (maybe pasting a marked-up screenshot) and pressing Redo. |
-| `retake.png` | The agent's terminal picking up the verdict, or the new card arriving on the page. |
-| `ok.png` | The retake's card after pressing OK. |
+| `hero.webp` | The inbox with a few items waiting (a clip, a question, a still), the yellow "agent waiting" glow on each. Under ~10 MB. |
+| `step-1-post.png` … `step-4-ok.png` | The loop as four stills: an item arrives, a Redo note, the retake on top with another project's item below, OK. Same size each. |
 
 Also worth having: the Stop hook refusing to let the agent end its turn with an unread verdict.
