@@ -1,6 +1,6 @@
 {
   "name": "agent-review-inbox",
-  "owner": { "name": "TBD" },
+  "owner": { "name": "trickstack" },
   "plugins": [
     {
       "name": "agent-review-inbox",

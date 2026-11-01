@@ -99,4 +99,4 @@ Built with Claude (Anthropic's Claude Opus 5.5 via Claude Code).
 
 ## License
 
-TBD
+[MIT](LICENSE)
