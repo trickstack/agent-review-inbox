@@ -2,7 +2,7 @@
 
 <h1><img src="assets/logo.svg" alt="" height="26">&nbsp; Agent Review Inbox</h1>
 
-<p><b>A review inbox for agent work that needs human eyes.</b></p>
+<p><b>See and hear what every session built, in one place.</b></p>
 
 <p>
   <a href="https://ko-fi.com/trickstack"><img src="https://img.shields.io/badge/Support%20me%20on%20Ko--fi-FF5E5B?logo=ko-fi&logoColor=white" alt="Support me on Ko-fi"></a>
@@ -11,30 +11,32 @@
   <a href="docs/codex-test.md"><img src="https://img.shields.io/badge/Codex-experimental-lightgrey" alt="Codex (experimental)"></a>
 </p>
 
-<!-- HERO: the inbox with items from three projects waiting on you. Keep it under ~10 MB so GitHub plays it inline. -->
-<img src="assets/hero.webp" alt="Three agents from three projects waiting on you: a web page clip, a question about a slide deck, a game clip" width="820">
+<!-- HERO: the real inbox with three sessions waiting on you, as a seamless loop. Keep it under ~10 MB so GitHub plays it inline. -->
+<img src="assets/hero.webp" alt="See and hear what every session built, in one place: the inbox with a game video from game-agent, a comparison from settings-agent and a question from web-agent, all waiting on you" width="820">
 
 </div>
 
-Running a bunch of agent sessions at once? You don't have to keep track of which one did what anymore. Work from all
-your agents lands in one inbox: videos of what they built, screenshots, and questions they need you to answer. Hit OK,
-Redo with a note, or pick an answer, and it goes straight back to the session that asked, which has to act on it before
-it can call the task done.
+Running a bunch of agent sessions at once? Every one of them reports to the same inbox in your browser: a video of what
+it built, a side-by-side of options, a sound, or a question it needs you to answer. Hit OK, Redo with a note, or pick an
+answer, and it goes straight back to the session that asked, which has to act on it before it can call the task done.
 
-It's for anything you judge by looking, listening or playing: a UI change, an animation, a particle effect, game feel, a
-sound.
+No more tab-hopping between terminals to find out who's waiting on you, and no launching the app yourself to see what
+changed. It shines for anything you judge by looking, listening or playing (a UI change, an animation, game feel, a
+sound), but any decision a session needs from you lands in the same place.
 
 A plugin for **Claude Code** (Codex: experimental): one Python file (stdlib only), one HTML page, three hooks and a skill.
 The CLI works with any agent that can run a shell command.
 
 ## Why
 
-Agents are good at changing code and bad at knowing whether the results are up to your standards. Without a channel for that, you get
-"please check the look" buried in a forgotten session, and "needs a human check" lines rotting in notes files. The inbox gives that judgement
-one place and closes the loop:
+With one session you can watch the terminal. With five, the hard part stops being the code and becomes keeping up: which
+one finished, which one is stuck on a question, and what did it actually change? Agents are good at changing code and bad
+at knowing whether the result is up to your standards, so without a channel for that you get "please check the look"
+buried in a forgotten tab and "needs a human check" lines rotting in notes files. The inbox gives every session one place
+to report to, and closes the loop:
 
 1. **Post.** The agent records a clip or still (`review.py clip`, `shot`, or any media it made), checks the contact sheet
-   itself, and posts it with what to look at.
+   itself, and posts it with what to look at. Or it posts a question, with one-click answers.
 2. **Notify.** A desktop notification pops up; clicking it opens the inbox page.
 3. **Verdict.** You watch, then press OK or Redo, with a note and, if you like, a pasted, marked-up screenshot.
 4. **Act.** The agent waits in the background and wakes the moment you answer. After about 45 idle minutes `wait`
