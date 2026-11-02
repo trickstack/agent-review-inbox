@@ -48,16 +48,7 @@ to report to, and closes the loop:
 
 ## What it looks like
 
-<table>
-  <tr>
-    <td width="50%"><img src="assets/step-1-post.png" alt="The first playable Brickfall, plain grey blocks, posted for review"><br><sub><b>1.</b> An agent posts its work and waits for you.</sub></td>
-    <td width="50%"><img src="assets/step-2-redo.png" alt="A note asking for neon and glow typed under the clip, about to press Redo"><br><sub><b>2.</b> You write a note and press Redo.</sub></td>
-  </tr>
-  <tr>
-    <td width="50%"><img src="assets/step-3-retake.png" alt="The retake: Brickfall with glowing neon bricks"><br><sub><b>3.</b> The retake lands on its own.</sub></td>
-    <td width="50%"><img src="assets/step-4-ok.png" alt="The inbox after OK: nothing waiting"><br><sub><b>4.</b> You press OK, and it's done.</sub></td>
-  </tr>
-</table>
+https://github.com/user-attachments/assets/90763798-e909-4e35-9de8-2faec85fd448
 
 ## Install
 
