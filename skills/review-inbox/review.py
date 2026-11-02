@@ -404,12 +404,14 @@ def playwright_page(url, fn, video_dir=None, size=(1280, 720)):
         ctx = browser.new_context(**opts)
         ctx.add_init_script(CURSOR_JS)
         page = ctx.new_page()
+        t = time.monotonic()  # the recording started inside new_page(), just before this: `filmed` never runs past it
         page.goto(url)
         fn(page)
+        filmed = time.monotonic() - t
         video = page.video
         ctx.close()  # the video file is only complete once the context closes
         browser.close()
-        return video.path() if video else None
+        return (video.path(), filmed) if video else None
 
 
 def clip(out_dir, seconds, url="", window="", steps=()):
@@ -428,12 +430,13 @@ def clip(out_dir, seconds, url="", window="", steps=()):
             page.wait_for_timeout(LEAD_MS)
             web_steps(page, steps)
             page.wait_for_timeout(max(LEAD_MS, seconds * 1000 - (time.time() - t) * 1000))
-        webm = playwright_page(url, film, video_dir=out_dir)
-        ok = ffmpeg() and subprocess.run([ffmpeg(), "-v", "error", "-y", "-i", webm, "-c:v", "libx264", "-pix_fmt", "yuv420p",
-                                          "-movflags", "+faststart", mp4]).returncode == 0
+        webm, filmed = playwright_page(url, film, video_dir=out_dir)
+        # closing the context pads the video with a second of its last frame (Playwright does that): cut where filming ended
+        ok = ffmpeg() and subprocess.run([ffmpeg(), "-v", "error", "-y", "-i", webm, "-t", f"{filmed:.3f}", "-c:v", "libx264",
+                                          "-pix_fmt", "yuv420p", "-movflags", "+faststart", mp4]).returncode == 0
         if ok:
             os.remove(webm)
-        else:  # no ffmpeg, or it failed: keep the recording as it is
+        else:  # no ffmpeg, or it failed: keep the recording as it is (padded tail and all)
             os.replace(webm, os.path.join(out_dir, "clip.webm"))
     else:
         if not ffmpeg():
