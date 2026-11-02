@@ -24,7 +24,7 @@ which the SessionStart hook hands the agent); the hook hands that session its ve
 prompt or by blocking the end of a turn until it has read and acted on them.
 
 Environment: REVIEW_INBOX_DIR (default ~/.review-inbox; --dir overrides it), REVIEW_INBOX_PORT (7700),
-REVIEW_INBOX_HOST (127.0.0.1), REVIEW_INBOX_SESSION, REVIEW_INBOX_BY, REVIEW_INBOX_AVF_INPUT (macOS capture device),
+REVIEW_INBOX_HOST (127.0.0.1), REVIEW_INBOX_HOSTNAME (a proxy's name to accept, e.g. box.tailnet.ts.net), REVIEW_INBOX_SESSION, REVIEW_INBOX_BY, REVIEW_INBOX_AVF_INPUT (macOS capture device),
 REVIEW_INBOX_BEAT_S (5: how often `wait` polls),
 Steps (--do "a; b; c", or --script <file> with one per line): click <target>, dblclick <target>, move <target>,
 type <text>, key <combo>, scroll <dy>, wait <ms>. A target is a Playwright selector on a page (text=Save, #email) or x,y:
@@ -54,6 +54,7 @@ CLI = f'"{shown(sys.executable)}" "{shown(os.path.abspath(__file__))}"'
 SID = os.environ.get("REVIEW_INBOX_SESSION") or os.environ.get("CLAUDE_CODE_SESSION_ID", "")  # the agent session using the CLI
 HOST = os.environ.get("REVIEW_INBOX_HOST") or "127.0.0.1"
 PORT = int(os.environ.get("REVIEW_INBOX_PORT") or 7700)
+HOSTNAME = os.environ.get("REVIEW_INBOX_HOSTNAME", "")  # the name a proxy you trust serves the page under, e.g. tailscale serve
 PAGE = f"http://127.0.0.1:{PORT}/"
 WARM_MIN = float(os.environ.get("REVIEW_INBOX_WARM_MIN") or 50)
 BEAT_S = float(os.environ.get("REVIEW_INBOX_BEAT_S") or 5)  # `wait` polls and touches its waiting.json this often
@@ -904,7 +905,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         """Only this page may talk to the server: a Host other than ours is DNS rebinding, a foreign Origin is another site."""
         host, origin = self.headers.get("Host", ""), self.headers.get("Origin")
         loopback = HOST in ("127.0.0.1", "localhost", "::1")  # bound wider (REVIEW_INBOX_HOST), any address of ours is fine
-        if (loopback and host not in (f"127.0.0.1:{PORT}", f"localhost:{PORT}")) or (origin and origin != f"http://{host}"):
+        ours = host in (f"127.0.0.1:{PORT}", f"localhost:{PORT}") or (HOSTNAME and host.split(":")[0] == HOSTNAME)
+        if (loopback and not ours) or (origin and origin not in (f"http://{host}", f"https://{host}")):
             self.send_error(403)
             return False
         return True

@@ -10,7 +10,8 @@ CLI = os.path.join(HERE, "..", "skills", "review-inbox", "review.py")
 tmp = tempfile.mkdtemp()
 PORT = "7799"
 ENV = {**os.environ, "REVIEW_INBOX_DIR": tmp, "REVIEW_INBOX_NO_TOAST": "1", "REVIEW_INBOX_NO_SERVER": "1",
-       "REVIEW_INBOX_BEAT_S": "0.5", "REVIEW_INBOX_PORT": PORT, "CLAUDE_CODE_SESSION_ID": "s1"}
+       "REVIEW_INBOX_BEAT_S": "0.5", "REVIEW_INBOX_PORT": PORT, "CLAUDE_CODE_SESSION_ID": "s1",
+       "REVIEW_INBOX_HOSTNAME": "box.tailnet.ts.net"}
 os.environ.update(ENV)
 sys.path.insert(0, os.path.dirname(CLI))
 import review  # noqa: E402  (reads the env above)
@@ -72,6 +73,12 @@ try:
     nope = json.dumps({"id": item["id"], "status": "ok"}).encode()
     assert code("/api/review", Host="evil.example:7799") == 403
     assert code("/api/review", nope, Origin="https://evil.example", **js) == 403
+    # behind a trusted proxy (tailscale serve passes the browser's Host through and the page's Origin is https)
+    ts = {"Host": "box.tailnet.ts.net:8443", "Origin": "https://box.tailnet.ts.net:8443"}
+    assert code("/api/review", Host="box.tailnet.ts.net") == 200
+    assert code("/api/review", b"{}", **ts, **js) == 400  # past the guard: refused only for the bad body
+    assert code("/api/review", Host="box.tailnet.ts.net.evil.example") == 403
+    assert code("/api/review", nope, Host="box.tailnet.ts.net", Origin="https://evil.example", **js) == 403
     assert code("/api/review", nope, **{"Content-Type": "text/plain"}) == 415
     assert code("/api/review", json.dumps({"id": item["id"], "status": "answered"}).encode(), **js) == 400  # not for a review
     assert review.items()[0]["status"] == "open"

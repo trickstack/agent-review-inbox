@@ -155,7 +155,8 @@ export REVIEW_INBOX_CLIP_CMD='my-recorder --last {seconds} --out "{out}"'
 |---|---|---|
 | `REVIEW_INBOX_DIR` | `~/.review-inbox` | where items live; to keep a project's items apart, point it at `<project>/.review-inbox` and give it its own port |
 | `REVIEW_INBOX_PORT` | `7700` | page port |
-| `REVIEW_INBOX_HOST` | `127.0.0.1` | set `0.0.0.0` to review from your phone over a VPN; there is no auth |
+| `REVIEW_INBOX_HOST` | `127.0.0.1` | address to listen on; there is no auth, see [Reviewing from your phone](#reviewing-from-your-phone) |
+| `REVIEW_INBOX_HOSTNAME` | | the name a proxy you trust serves the page under, e.g. `box.tailnet.ts.net` |
 | `REVIEW_INBOX_WARM_MIN` | `50` | `wait` stops after this many idle minutes, minus 5 (sized for a one-hour prompt cache) |
 | `REVIEW_INBOX_CLIP_CMD` | | custom capture command |
 | `REVIEW_INBOX_DESKTOP` | | `1` allows screen and window recording and desktop steps (they take over your screen and mouse) |
@@ -168,6 +169,35 @@ export REVIEW_INBOX_CLIP_CMD='my-recorder --last {seconds} --out "{out}"'
 | `REVIEW_INBOX_AVF_INPUT` | `1:none` | macOS: the avfoundation device to record |
 
 Notifications: Windows toast (click opens the page), macOS Notification Center, Linux `notify-send`, otherwise none.
+
+### Reviewing from your phone
+
+The page has no login, so reach it only over a private network you control. The easy way is
+[Tailscale](https://tailscale.com) (free for personal use):
+
+1. Install Tailscale on your computer and your phone, and sign in to the same account on both.
+2. In the admin console, under **DNS**, turn on MagicDNS and HTTPS Certificates (`tailscale serve` links you there if
+   they're off).
+3. Give the inbox HTTPS on your tailnet (with `sudo` on Linux). It stays on across restarts; `tailscale serve --https=7700 off` removes it:
+
+   ```bash
+   tailscale serve --bg --https=7700 http://127.0.0.1:7700
+   ```
+
+4. Set `REVIEW_INBOX_HOSTNAME` to the machine name that command printed (like `box.tailnet.ts.net`), somewhere your agent
+   sees it: your shell profile, or `env` in `~/.claude/settings.json`. If the page is already running, stop it once so
+   it starts again with the setting.
+5. Open `https://box.tailnet.ts.net:7700/` on your phone.
+
+Other ways in:
+
+- **Any VPN** (WireGuard, ZeroTier, Nebula): set `REVIEW_INBOX_HOST` to the machine's VPN address, open `http://<address>:7700/`.
+- **SSH:** `ssh -L 7700:127.0.0.1:7700 box`, then `http://localhost:7700/`.
+- **Your own HTTPS reverse proxy** (Caddy, nginx): pass the `Host` header through, set `REVIEW_INBOX_HOSTNAME` to its
+  name, and put auth in front.
+
+Never port-forward it or put it on a public tunnel (ngrok, Cloudflare Tunnel, `tailscale funnel`) without auth: anyone
+with the URL could answer your agents.
 
 ### Storage
 
