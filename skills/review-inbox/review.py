@@ -33,9 +33,10 @@ the screen. Desktop steps need pyautogui and REVIEW_INBOX_DESKTOP=1; the cursor 
 
 REVIEW_INBOX_WARM_MIN (50: `wait` gives up this many idle minutes minus 5, sized for a one-hour prompt cache), REVIEW_INBOX_CLIP_CMD (custom capture
 command, {out} and {seconds} are filled in), REVIEW_INBOX_NO_TOAST, REVIEW_INBOX_NO_SERVER, REVIEW_INBOX_DESKTOP (1: allow screen/window capture and desktop steps),
-REVIEW_INBOX_KEEP_DAYS (7: answered items lose their media after this many days; 0 keeps everything).
+REVIEW_INBOX_KEEP_DAYS (7: answered items lose their media after this many days; 0 keeps everything),
+REVIEW_INBOX_WHISPER (whisper-server or its folder: turns on the page's Dictate), REVIEW_INBOX_WHISPER_MODEL (large-v3-turbo-q5_0: a model name, downloaded once, or a .bin path), REVIEW_INBOX_STT_PORT (page port + 1).
 """
-import argparse, base64, binascii, glob, http.server, json, os, re, shutil, subprocess, sys, time
+import argparse, base64, binascii, glob, http.server, json, os, re, shutil, subprocess, sys, threading, time
 from datetime import datetime
 
 def shown(path):
@@ -309,6 +310,7 @@ def web_steps(page, steps):
         if xy(target):
             return xy(target)
         try:
+            page.locator(target).first.scroll_into_view_if_needed(timeout=5000)  # else a target below the fold is clicked in thin air
             box = page.locator(target).first.bounding_box(timeout=5000)
         except Exception:  # Playwright's TimeoutError: say which step, not 30 lines of stack
             box = None
@@ -489,6 +491,116 @@ def shot(png, url="", window="", steps=()):
     subprocess.run([ffmpeg(), "-v", "error", "-y", *screen_src(window), "-frames:v", "1", "-update", "1", png])
 
 
+# ---------------------------------------------------------------- dictation
+
+# The page's Dictate button: whisper.cpp's whisper-server with Silero VAD, started on the first recording and stopped after
+# STT_IDLE s so it doesn't hold memory. Models are not in the repo: a name is downloaded into STT_CACHE once the human says yes
+# on the page (data files only: whisper-server itself is never downloaded for you), a path is used as is.
+WHISPER = os.environ.get("REVIEW_INBOX_WHISPER", "")  # whisper-server, or the folder holding it; else whisper-server on PATH
+WHISPER_MODEL = os.environ.get("REVIEW_INBOX_WHISPER_MODEL") or "large-v3-turbo-q5_0"  # ~550 MB; large-v3-turbo is 1.6 GB
+STT_MODELS = ((WHISPER_MODEL, "ggerganov/whisper.cpp"), ("silero-v6.2.0", "ggml-org/whisper-vad"))  # (name or path, HF repo)
+WHISPER_FIX = ("brew install whisper-cpp" if sys.platform == "darwin" else "unzip whisper-bin-x64.zip (Windows) or "
+               "whisper-bin-ubuntu-x64.tar.gz from https://github.com/ggml-org/whisper.cpp/releases and point REVIEW_INBOX_WHISPER at that folder")
+STT_CACHE = os.path.join(os.path.expanduser("~"), ".cache", "review-inbox")
+STT_PORT = int(os.environ.get("REVIEW_INBOX_STT_PORT") or PORT + 1)
+STT_IDLE = 600
+STT = {"proc": None, "timer": None, "lock": threading.Lock(), "dl": None, "mb": None}
+
+
+def whisper_server():
+    exe = "whisper-server" + (".exe" if os.name == "nt" else "")
+    found = os.path.join(WHISPER, exe) if os.path.isdir(WHISPER) else WHISPER or shutil.which(exe) or ""
+    return found if os.path.isfile(found) else None
+
+
+def model_path(name):
+    return name if os.path.isfile(name) else os.path.join(STT_CACHE, f"ggml-{name}.bin")
+
+
+def model_url(name, repo):
+    return f"https://huggingface.co/{repo}/resolve/main/ggml-{name}.bin"
+
+
+def stt_status():
+    """What the page's Dictate needs: setup only the human can do (missing), else the models to download after asking."""
+    import urllib.request
+    fixes = {w: f for w, _, f in doctor()}
+    missing = [f"{w}: {fixes.get(w, WHISPER_FIX)}" for w, ok in (("ffmpeg", ffmpeg()), ("whisper-server", whisper_server())) if not ok]
+    need = [(n, r) for n, r in STT_MODELS if not os.path.isfile(model_path(n))]
+    if need and not missing and STT["mb"] is None:  # the size to ask about: one byte of each, the total is in Content-Range
+        try:
+            STT["mb"] = sum(int(urllib.request.urlopen(urllib.request.Request(model_url(n, r), headers={"Range": "bytes=0-0"}),
+                                                       timeout=15).headers["Content-Range"].split("/")[1]) for n, r in need) // 10**6
+        except (OSError, ValueError, AttributeError, IndexError):
+            pass
+    return {"ready": not missing and not need, "missing": missing, "need": [n for n, _ in need], "mb": STT["mb"],
+            "cache": shown(STT_CACHE), "dl": STT["dl"]}
+
+
+def stt_download():
+    """Fetch the missing models in the background (each a .part file until it's whole); the page polls stt_status()."""
+    import urllib.request
+    with STT["lock"]:
+        if STT["dl"] and STT["dl"]["busy"]:
+            return
+        need = [(n, r) for n, r in STT_MODELS if not os.path.isfile(model_path(n))]
+        STT["dl"] = {"busy": True, "done": 0, "error": ""}
+
+    def run():
+        try:
+            os.makedirs(STT_CACHE, exist_ok=True)
+            for name, repo in need:
+                path, base = model_path(name), STT["dl"]["done"]
+                urllib.request.urlretrieve(model_url(name, repo), path + ".part", lambda n, bs, _: STT["dl"].update(done=base + n * bs))
+                os.replace(path + ".part", path)
+        except OSError as e:
+            STT["dl"]["error"] = str(e)[:300]
+        STT["dl"]["busy"] = False
+    threading.Thread(target=run, daemon=True).start()
+
+
+def port_open(port):
+    import socket
+    try:
+        socket.create_connection(("127.0.0.1", port), timeout=0.2).close()
+        return True
+    except OSError:
+        return False
+
+
+def stt(audio):
+    """A browser recording (webm/ogg/wav) -> text."""
+    import urllib.request
+    if not stt_status()["ready"]:
+        raise ValueError("dictation isn't set up yet: click Dictate again for what it needs")
+    wav = subprocess.run([ffmpeg(), "-loglevel", "error", "-i", "pipe:0", "-ar", "16000", "-ac", "1", "-f", "wav", "pipe:1"],
+                         input=audio, capture_output=True, check=True).stdout
+    with STT["lock"]:  # one start at a time
+        if not (STT["proc"] and STT["proc"].poll() is None):
+            model, vad = (model_path(n) for n, _ in STT_MODELS)
+            STT["proc"] = subprocess.Popen(
+                [whisper_server(), "--host", "127.0.0.1", "--port", str(STT_PORT), "--model", model,
+                 "--threads", str(max(2, min(8, (os.cpu_count() or 4) - 2))), "--vad", "--vad-model", vad,
+                 "--vad-threshold", "0.50", "--vad-min-speech-duration-ms", "250", "--vad-min-silence-duration-ms", "350",
+                 "--vad-speech-pad-ms", "180", "--language", "auto", "--suppress-nst", "--no-speech-thold", "0.55"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL,
+                creationflags=0x08000000 if os.name == "nt" else 0)  # no console window
+            for _ in range(240):  # the model takes a few seconds to load before the port opens
+                if port_open(STT_PORT) or STT["proc"].poll() is not None:
+                    break
+                time.sleep(0.25)
+        if STT["timer"]:
+            STT["timer"].cancel()
+        STT["timer"] = threading.Timer(STT_IDLE, STT["proc"].terminate)
+        STT["timer"].daemon = True
+        STT["timer"].start()
+    b = "----reviewinboxstt"
+    body = (f'--{b}\r\nContent-Disposition: form-data; name="response_format"\r\n\r\njson\r\n'
+            f'--{b}\r\nContent-Disposition: form-data; name="file"; filename="a.wav"\r\nContent-Type: audio/wav\r\n\r\n').encode() + wav + f"\r\n--{b}--\r\n".encode()
+    req = urllib.request.Request(f"http://127.0.0.1:{STT_PORT}/inference", body, {"Content-Type": "multipart/form-data; boundary=" + b})
+    return " ".join(json.loads(urllib.request.urlopen(req, timeout=300).read()).get("text", "").split())  # segments come newline-split
+
+
 # ---------------------------------------------------------------- doctor
 
 def doctor():
@@ -506,6 +618,8 @@ def doctor():
                     "brew install ffmpeg" if mac else "sudo apt install ffmpeg" if linux else
                     "winget install Gyan.FFmpeg; or without winget, unzip ffmpeg.exe from "
                     "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip into ~/.local/bin"))
+    if WHISPER and not whisper_server():  # dictation is opt-in: only a REVIEW_INBOX_WHISPER that points nowhere is reported
+        out.append(("whisper-server", "dictation on the page", WHISPER_FIX))
     if not has("playwright"):
         out.append(("playwright", "clips and stills of web pages", f"{pip} playwright; then {PY} -m playwright install chromium"))
     else:
@@ -805,10 +919,21 @@ def wait(item_id="", sid=None):
 
 
 def hook():
-    """Claude Code hook. SessionStart: tells the agent the inbox exists. UserPromptSubmit: verdicts arrive with the prompt.
-    Stop: the turn can't end before the agent has read a verdict, acted on it, and armed `wait` for its open items."""
     ev = json.load(sys.stdin)
+    blocked = respond(ev)
+    try:
+        track(ev, blocked)
+    except (OSError, ValueError):  # the session cards are a nicety: never fail a hook over them
+        pass
+
+
+def respond(ev):
+    """Claude Code hook. SessionStart: tells the agent the inbox exists. UserPromptSubmit: verdicts arrive with the prompt.
+    Stop: the turn can't end before the agent has read a verdict, acted on it, and armed `wait` for its open items.
+    True when it blocked the turn."""
     sid, name = ev.get("session_id", ""), ev.get("hook_event_name")
+    if name == "SessionEnd":
+        return
     if name == "SessionStart":
         print(f"You have a review inbox ({PAGE}). When you finish something a human has to judge by eye, ear or feel "
               f"(UI, visuals, animation, motion, sound, copy), post it there instead of asking in chat: see the review-inbox skill. CLI (use exactly this, it carries your session): {cli(sid)}"
@@ -842,7 +967,7 @@ def hook():
     if found:
         text = act(sid) + deliver(found)
         print(json.dumps({"decision": "block", "reason": text}) if stop else text)
-        return
+        return stop
     if stop and not ev.get("stop_hook_active"):
         todo = unresolved(sid)
         if todo:
@@ -850,18 +975,100 @@ def hook():
                               + f"\nREDO: rework it and post the next take (`{cli(sid)} add`). OK: finish it, then `{cli(sid)} handled <id> "
                               "\"committed <hash>\"`. Only if you truly can't go on alone (you need the human's answer): "
                               f"`{cli(sid)} handled <id> \"<why>\"`, then post your question with `{cli(sid)} ask` and run `wait`."}))
-            return
+            return True
         idle = [i["id"] for i in mine(sid) if not i.get("answered") and not waiting(i["id"]) and marked(i["id"], "gaveup") is None]
         if idle:
             print(json.dumps({"decision": "block", "reason": f"Open review item(s) {', '.join(idle)} with nothing waiting for the answer: "
                               f"run `{cli(sid)} wait` as a background command (run_in_background), then end your turn."}))
-            return
+            return True
         # the human steers through the inbox and misses questions asked in chat: catch a turn that ends on one, once.
         # Only in a session that has used the inbox; anywhere else a question in chat is just a question.
         own = mine(sid)
         if own and not any(not i.get("answered") for i in own) and asks_human(last_message(ev)):
             print(json.dumps({"decision": "block", "reason": f"If that's a question for the human, post it with `{cli(sid)} ask \"<question>\" "
                               "[--options A B ...]` and run `wait` as a background command; otherwise just end your turn."}))
+            return True
+
+
+# ---------------------------------------------------------------- sessions (the cards beside the inbox)
+
+SESSIONS = os.path.join(DIR, ".sessions")
+GONE_MIN = 60  # an idle session with nothing in the inbox drops off the page after this long (no SessionEnd if it crashed)
+
+
+def track(ev, blocked):
+    """Every session's hooks keep .sessions/<sid>.json: working since (turn), last activity, idle once a turn really ends."""
+    sid, name = ev.get("session_id", ""), ev.get("hook_event_name")
+    if not sid:
+        return
+    path = os.path.join(SESSIONS, re.sub(r"[^A-Za-z0-9_-]", "", sid) + ".json")
+    if name == "SessionEnd":
+        if os.path.exists(path):
+            os.remove(path)
+        return
+    try:
+        with open(path, encoding="utf-8") as f:
+            s = json.load(f)
+    except (OSError, ValueError):
+        s = {"sid": sid, "started": time.time()}
+    proj = os.environ.get("CLAUDE_PROJECT_DIR") or ev.get("cwd") or project_dir()
+    s.update(project=os.path.basename(os.path.normpath(proj)), project_dir=proj, last=time.time())
+    if name == "UserPromptSubmit":
+        if not s.get("busy"):
+            s["turn"] = time.time()
+        s["busy"] = True
+        s.setdefault("prompt", " ".join((ev.get("prompt") or "").split())[:80])  # the card's name when the app's isn't known
+    elif name == "SessionStart" or (name == "Stop" and not blocked):
+        s["busy"] = False
+    os.makedirs(SESSIONS, exist_ok=True)
+    with open(path + ".tmp", "w", encoding="utf-8") as f:
+        json.dump(s, f)
+    os.replace(path + ".tmp", path)
+
+
+def app_sessions():
+    """Claude Code's own record of each running session (name, pid), by session id. Not a documented interface: when it
+    isn't there, cards fall back to the session's first prompt and nobody is dropped for a dead pid."""
+    out = {}
+    for f in glob.glob(os.path.join(os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude"), "sessions", "*.json")):
+        try:
+            with open(f, encoding="utf-8") as fh:
+                d = json.load(fh)
+            out[d["sessionId"]] = d
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+    return out
+
+
+def sessions():
+    """The live sessions for the page: working or idle, with what they have in the inbox. Dead ones are removed."""
+    now, app, everything = time.time(), app_sessions(), items()
+    out = []
+    for f in glob.glob(os.path.join(SESSIONS, "*.json")):
+        try:
+            with open(f, encoding="utf-8") as fh:
+                s = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        a = app.get(s.get("sid"), {})
+        mine_open = [i for i in everything if i.get("sid") == s.get("sid") and i["status"] == "open"]
+        if (a.get("pid") and not pid_alive(int(a["pid"]))) or (
+                not a and not s.get("busy") and not mine_open and now - s.get("last", 0) > GONE_MIN * 60):
+            try:
+                os.remove(f)
+            except OSError:
+                pass
+            continue
+        if a.get("status") in ("busy", "idle"):  # the app knows turns no prompt started (a background task waking it)
+            busy = a["status"] == "busy"
+            if busy and not s.get("busy"):
+                s["turn"] = (a.get("statusUpdatedAt") or now * 1000) / 1000
+            if not busy and s.get("busy"):
+                s["last"] = (a.get("statusUpdatedAt") or now * 1000) / 1000
+            s["busy"] = busy
+        out.append({**s, "name": a.get("name") or s.get("prompt") or "", "open": len(mine_open),
+                    "waiting": any(waiting(i["id"]) for i in mine_open)})
+    return {"now": now, "warm_min": WARM_MIN, "sessions": out}
 
 
 def last_message(ev):
@@ -967,6 +1174,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send_body(json.dumps([{**i, "waiting": waiting(i["id"])} for i in items()]))
         if path == "/api/dir":
             return self.send_body(DIR, "text/plain; charset=utf-8")
+        if path == "/api/sessions":
+            return self.send_body(json.dumps(sessions()))
+        if path == "/api/stt":  # what Dictate still needs, and model download progress
+            return self.send_body(json.dumps(stt_status()))
         m = re.fullmatch(r"/media/([^/]+)/([^/]+)", path)
         if m:
             from urllib.parse import unquote
@@ -979,6 +1190,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         if not self.local():
             return
+        if self.path == "/api/stt/download":  # the human said yes to the model download
+            if not self.headers.get("Content-Type", "").startswith("application/json"):
+                return self.send_error(415)
+            stt_download()
+            return self.send_body("{}")
+        if self.path == "/api/stt":  # raw recording -> {"text"}; audio/* can't come from another site's form either
+            if not self.headers.get("Content-Type", "").startswith("audio/"):
+                return self.send_error(415)
+            try:
+                size = int(self.headers.get("Content-Length", 0))
+                if size > MAX_BODY:
+                    return self.send_error(413)
+                return self.send_body(json.dumps({"text": stt(self.rfile.read(size))}))
+            except (OSError, ValueError, subprocess.CalledProcessError) as e:
+                return self.send_body(json.dumps({"error": str(e)[:400]}), "application/json", 500)
         if self.path != "/api/review":
             return self.send_error(404)
         if not self.headers.get("Content-Type", "").startswith("application/json"):  # a form post from another site can't set it

@@ -2,101 +2,188 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Review inbox</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
-  :root { --bg:#0b1016; --panel:#121a23; --panel2:#0e151d; --line:#22303d; --text:#e4edf3; --dim:#7d91a1; --link:#7fd3f7;
-          --ok:#3ddc97; --redo:#ffb454; --wait:#ffcc33; --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.6); }
+  /* A dailies room: graphite neutrals, the slate yellow of the logo as the one accent ("this needs you"), timecode in mono. */
+  :root { color-scheme:dark;
+    --deep:#0f0f10; --bg:#141415; --card:#19191b; --raised:#232325; --line:rgba(237,237,237,.08); --line2:rgba(237,237,237,.14);
+    --text:#ededed; --text2:#a1a1a6; --dim:#85858b; --link:#9ec5f0;
+    --accent:#ffcc33; --accent-ink:#ffcc33; --on-accent:#1a1400; --ok:#4cc38a; --redo:#e5825f;
+    --primary:#ededed; --on-primary:#141415; --stage:#0b0b0c;
+    --sans:"IBM Plex Sans", ui-sans-serif, system-ui, "Segoe UI", sans-serif; --mono:"IBM Plex Mono", ui-monospace, Consolas, monospace;
+    --ease:cubic-bezier(.22,1,.36,1); }
   @media (prefers-color-scheme: light) {
-    :root { --bg:#f4f6f8; --panel:#fff; --panel2:#f7f9fb; --line:#dfe5ea; --text:#17212b; --dim:#5f7180; --link:#0b74b5;
-            --ok:#14a86c; --redo:#d9861c; --wait:#e6a700; --shadow:0 1px 2px rgba(16,24,32,.06), 0 8px 24px -14px rgba(16,24,32,.25); }
+    :root { color-scheme:light;
+      --deep:#f4f4f5; --bg:#fafafa; --card:#fff; --raised:#f4f4f5; --line:rgba(23,23,23,.08); --line2:rgba(23,23,23,.16);
+      --text:#171717; --text2:#525252; --dim:#737373; --link:#1d5fa8;
+      --accent-ink:#8a6500; --ok:#16a34a; --redo:#c2410c; --primary:#171717; --on-primary:#fff; }
   }
   * { box-sizing:border-box; }
   html { background:var(--bg); }
-  body { font:14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; max-width:960px; margin:0 auto; padding:0 20px 48px; color:var(--text); }
+  body { font:400 14px/20px var(--sans); margin:0; color:var(--text); }
+  button { font:inherit; color:inherit; }
   a { color:var(--link); text-decoration:none; } a:hover { text-decoration:underline; }
-  header { display:flex; align-items:center; gap:14px; padding:18px 0 14px; background:var(--bg); }
-  header svg { width:34px; height:26px; flex:none; }
-  header h1 { margin:0; font-size:19px; font-weight:650; letter-spacing:-.01em; }
-  header .sub { color:var(--dim); font-size:13px; }
-  nav#tabs { margin-left:auto; display:flex; gap:2px; padding:3px; background:var(--panel); border:1px solid var(--line); border-radius:10px; }
-  nav#tabs button { background:none; border:0; color:var(--dim); padding:6px 14px; border-radius:7px; cursor:pointer; font:inherit; font-weight:550; }
-  nav#tabs button.on { background:var(--panel2); color:var(--text); box-shadow:0 0 0 1px var(--line); }
-  nav#tabs .n { margin-left:6px; font-size:12px; color:var(--dim); }
-  .card { position:relative; background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:18px 20px; margin:14px 0; box-shadow:var(--shadow); }
-  /* an agent is blocked on this one right now (review.py wait); the flag drops when it gets the answer or gives up */
-  .card.waiting { border-color:var(--wait); box-shadow:0 0 0 1px var(--wait), 0 0 28px -6px var(--wait), var(--shadow); animation:pulse 2.4s ease-in-out infinite; }
-  @keyframes pulse { 50% { box-shadow:0 0 0 1px var(--wait), 0 0 40px -2px var(--wait), var(--shadow); } }
-  @media (prefers-reduced-motion: reduce) { .card.waiting { animation:none; } }
+  :focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  .mono { font-family:var(--mono); font-variant-numeric:tabular-nums; }
+
+  /* one app: a top bar across the page, then the inbox and the session board side by side on the same surface, each
+     opening with a header row of the same height; on a narrow screen the sessions sit on top as a strip */
+  .bar { position:sticky; top:0; z-index:2; height:56px; display:flex; align-items:center; gap:12px; padding:0 24px;
+    background:var(--bg); border-bottom:1px solid var(--line); }
+  .bar svg { width:28px; height:21px; flex:none; }
+  .bar h1 { margin:0; font-size:16px; line-height:24px; font-weight:500; white-space:nowrap; }
+  .sub { color:var(--text2); font-size:13px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .sub::before { content:""; display:inline-block; width:1px; height:16px; background:var(--line2); margin:0 12px 0 4px; vertical-align:-3px; }
+  .sub:empty::before { display:none; }
+  .sub button { color:var(--link); background:none; border:0; padding:0; cursor:pointer; }
+  .split { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); max-width:1600px; margin:0 auto; }
+  #inbox { min-width:0; padding:0 24px 48px; }
+  .colhead { position:sticky; top:56px; z-index:1; height:56px; display:flex; align-items:center; gap:12px; background:var(--bg); }
+  .colhead h2 { margin:0; font-size:15px; line-height:24px; font-weight:500; }
+  .colhead .count { font:12px var(--mono); color:var(--dim); }
+  #list { padding-top:4px; }
+  #list > .card:first-child { margin-top:0; }
+  nav#tabs { margin-left:auto; display:flex; gap:4px; padding:4px; background:var(--card); border:1px solid var(--line); border-radius:10px; }
+  nav#tabs button { background:none; border:0; color:var(--text2); height:28px; padding:0 12px; border-radius:6px; cursor:pointer; transition:background-color .15s var(--ease), color .15s var(--ease); }
+  nav#tabs button:hover { color:var(--text); }
+  nav#tabs button.on { background:var(--raised); color:var(--text); box-shadow:inset 0 1px 0 rgba(255,255,255,.06); }
+  nav#tabs .n { margin-left:8px; font:12px var(--mono); color:var(--dim); }
+
+  /* an item card */
+  .card { position:relative; background:var(--card); border:1px solid var(--line); border-radius:14px; padding:20px; margin:12px 0; }
+  /* an agent is blocked on this one right now (review.py wait): the slate yellow rail, until it gets the answer or gives up */
+  .card.waiting { border-color:color-mix(in srgb, var(--accent) 45%, transparent); }
+  .card.waiting::before { content:""; position:absolute; left:-1px; top:16px; bottom:16px; width:3px; border-radius:0 2px 2px 0; background:var(--accent); }
   .card:not(.waiting) .wbadge { display:none; }
-  .head { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-  .title { font-weight:650; font-size:16px; letter-spacing:-.005em; margin-right:4px; }
-  .chip { font-size:11.5px; font-weight:600; padding:2px 9px; border-radius:999px; background:var(--panel2); border:1px solid var(--line); color:var(--dim); }
-  .chip.wbadge { background:var(--wait); border-color:var(--wait); color:#1a1300; }
-  .chip.s-ok { color:var(--ok); border-color:var(--ok); }
-  .chip.s-redo { color:var(--redo); border-color:var(--redo); }
-  .meta { color:var(--dim); font-size:12.5px; margin-left:auto; }
-  .how { margin:8px 0 12px; white-space:pre-wrap; overflow-wrap:anywhere; }
-  /* each clip or still keeps its own shape (no black bars): one is shown big, several shrink to sit side by side */
-  .media { display:flex; flex-wrap:wrap; justify-content:center; align-items:flex-start; gap:10px; margin:10px 0 4px; }
+  .head { display:flex; gap:8px 12px; align-items:baseline; flex-wrap:wrap; }
+  .title { font-size:16px; line-height:24px; font-weight:500; }
+  .tag { font:12px/16px var(--mono); color:var(--dim); }
+  .wbadge { color:var(--accent-ink); }
+  .wbadge::before, .scard.waiting .si::before { content:""; display:inline-block; width:6px; height:6px; border-radius:50%; background:var(--accent); margin-right:8px; vertical-align:1px; }
+  .s-ok { color:var(--ok); } .s-redo { color:var(--redo); } .s-answered { color:var(--text2); }
+  button.pchip { background:none; border:0; padding:0; cursor:pointer; } button.pchip:hover { color:var(--text); text-decoration:underline; }
+  .meta { margin-left:auto; }
+  .how { margin:8px 0 16px; color:var(--text2); white-space:pre-wrap; overflow-wrap:anywhere; }
+
+  /* the take on a viewer stage: each clip or still keeps its own shape, one big, several side by side */
+  .media { display:flex; flex-wrap:wrap; justify-content:center; align-items:flex-start; gap:8px; margin:0 0 8px; padding:12px;
+    background:var(--stage); border-radius:10px; }
+  .media:empty { display:none; }
   .media > * { max-width:100%; }
-  .media img, .media video { display:block; width:auto; height:auto; max-width:100%; max-height:480px; border-radius:10px; }
-  .media.multi img, .media.multi video { max-height:280px; max-width:calc(50% - 5px); }
-  .media .aud { flex:1 1 100%; display:flex; flex-direction:column; font-size:12px; gap:4px; }
-  .files { display:flex; flex-wrap:wrap; gap:12px; margin-bottom:12px; }
-  .files a { font-size:12px; color:var(--dim); }
-  .answer { background:var(--panel2); border:1px solid var(--line); border-radius:12px; padding:10px; }
-  textarea { width:100%; min-height:46px; background:transparent; color:var(--text); border:0; outline:0; padding:4px 6px; font:inherit; resize:vertical; }
-  .acts { margin-top:6px; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-  .acts button { padding:7px 16px; border-radius:9px; border:1px solid transparent; cursor:pointer; font:inherit; font-weight:650; transition:filter .15s, transform .05s; }
-  .acts button:hover { filter:brightness(1.08); } .acts button:active { transform:translateY(1px); }
-  .b-ok { background:var(--ok); color:#04150d; } .b-redo { background:var(--redo); color:#1d1100; }
-  .opts { display:grid; gap:6px; margin:4px 0 12px; }
-  .opt { display:flex; align-items:center; gap:10px; width:100%; text-align:left; padding:9px 12px; border-radius:10px; cursor:pointer;
-    background:var(--panel2); border:1px solid var(--line); color:var(--text); font:inherit; transition:border-color .15s, background .15s; }
-  .opt:hover { border-color:var(--link); }
-  .opt .n { flex:none; width:22px; height:22px; border-radius:6px; display:grid; place-items:center; font-size:12px; font-weight:700;
-    background:var(--panel); border:1px solid var(--line); color:var(--dim); }
-  .opt.on { border-color:var(--link); background:color-mix(in srgb, var(--link) 14%, var(--panel2)); }
-  .opt.on .n { background:var(--link); border-color:var(--link); color:#04121b; }
-  .acts .msg { color:var(--redo); font-size:12.5px; }
-  .chip.qchip { background:var(--link); border-color:var(--link); color:#04121b; }
-  .chip.s-answered { color:var(--link); border-color:var(--link); }
-  button.chip.pchip { cursor:pointer; font:inherit; font-size:11.5px; font-weight:600; } button.chip.pchip:hover { color:var(--text); }
-  header .sub button { font:inherit; color:var(--link); background:none; border:0; padding:0; cursor:pointer; }
-  .acts .b-dis { background:transparent; color:var(--dim); border-color:var(--line); }
+  .media img, .media video { display:block; width:auto; height:auto; max-width:100%; max-height:480px; border-radius:4px; }
+  .media.multi img, .media.multi video { max-height:280px; max-width:calc(50% - 4px); }
+  .media .aud { flex:1 1 100%; display:flex; flex-direction:column; gap:4px; font:12px var(--mono); color:#a1a1a6; }
+  .files { display:flex; flex-wrap:wrap; gap:4px 16px; margin-bottom:16px; }
+  .files a { font:12px/16px var(--mono); color:var(--dim); }
+
+  .answer { background:var(--deep); border:1px solid var(--line); border-radius:10px; padding:8px; }
+  textarea { width:100%; min-height:48px; background:transparent; color:var(--text); border:0; outline:0; padding:4px 8px; font:inherit; resize:vertical; }
+  textarea::placeholder { color:var(--dim); }
+  .acts { margin-top:8px; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .acts button { height:36px; padding:0 16px; border-radius:8px; border:1px solid transparent; cursor:pointer;
+    transition:background-color .15s var(--ease), color .15s var(--ease), border-color .15s var(--ease), transform .12s var(--ease); }
+  .acts button:active { transform:scale(.98); }
+  .b-ok { background:var(--primary); color:var(--on-primary); font-weight:500; box-shadow:inset 0 1px 0 rgba(255,255,255,.12); }
+  .b-ok:hover { background:color-mix(in srgb, var(--primary) 88%, var(--bg)); }
+  .b-redo { background:var(--raised); border-color:var(--line2) !important; color:var(--text); font-weight:500; }
+  .b-redo:hover { border-color:var(--redo) !important; color:var(--redo); }
+  .acts .b-dis { background:transparent; color:var(--text2); padding:0 12px; }
+  .acts .b-dis:hover { background:var(--raised); color:var(--text); }
+  .acts .msg { color:var(--redo); font-size:13px; }
   .acts .spacer { flex:1; }
-  .empty { text-align:center; color:var(--dim); margin:18vh 0; font-size:15px; }
-  .empty b { display:block; color:var(--text); font-size:17px; margin-bottom:4px; }
+
+  .opts { display:grid; gap:4px; margin:0 0 16px; }
+  .opt { display:flex; align-items:center; gap:12px; width:100%; min-height:40px; text-align:left; padding:8px 12px; border-radius:8px; cursor:pointer;
+    background:var(--deep); border:1px solid var(--line); color:var(--text); transition:border-color .15s var(--ease), background-color .15s var(--ease); }
+  .opt:hover { border-color:var(--line2); background:var(--raised); }
+  .opt .n { flex:none; min-width:20px; height:20px; padding:0 4px; border-radius:4px; display:grid; place-items:center; font:12px var(--mono);
+    border:1px solid var(--line2); border-bottom-width:2px; color:var(--text2); }
+  .opt.on { border-color:var(--accent); background:var(--raised); }
+  .opt.on .n { background:var(--accent); border-color:var(--accent); color:var(--on-accent); }
+
+  .empty { text-align:center; color:var(--text2); margin:16vh 0; }
+  .empty b { display:block; color:var(--text); font-size:16px; line-height:24px; font-weight:500; margin-bottom:4px; }
   #more[hidden] { display:none; }
-  #more { display:block; margin:8px auto; background:var(--panel); border:1px solid var(--line); color:var(--text); padding:7px 16px; border-radius:9px; cursor:pointer; font:inherit; }
-  .pend, .reply { display:flex; gap:6px; flex-wrap:wrap; }
-  .pend:not(:empty), .reply { margin:6px; }
-  .pend img, .reply img { max-height:90px; border-radius:6px; border:1px solid var(--line); display:block; }
+  #more { display:block; margin:8px auto; background:var(--card); border:1px solid var(--line); color:var(--text); height:36px; padding:0 16px; border-radius:8px; cursor:pointer; }
+  #more:hover { background:var(--raised); }
+  .pend, .reply { display:flex; gap:8px; flex-wrap:wrap; }
+  .pend:not(:empty), .reply { margin:8px; }
+  .pend img, .reply img { max-height:88px; border-radius:6px; border:1px solid var(--line); display:block; }
   .thumb { position:relative; }
-  .thumb .x { position:absolute; top:3px; right:3px; width:22px; height:22px; padding:0; border:0; border-radius:50%; cursor:pointer;
-    background:rgba(0,0,0,.75); color:#fff; font:16px/22px system-ui; }
-  .thumb .x:hover { background:#e86a5a; }
+  .thumb .x { position:absolute; top:4px; right:4px; width:20px; height:20px; padding:0; border:0; border-radius:50%; cursor:pointer;
+    background:rgba(0,0,0,.75); color:#fff; font:14px/20px var(--sans); }
+  .thumb .x:hover { background:var(--redo); }
   .card[hidden] { display:none; }
-  .card.new { animation:pop .45s cubic-bezier(.2,1.4,.4,1); }
-  @keyframes pop { from { opacity:0; transform:translateY(-10px) scale(.96); } }
-  @media (prefers-reduced-motion: reduce) { .card.new { animation:none; } }
-  .card.drop { outline:2px dashed var(--link); outline-offset:2px; }
+  .card.new { animation:enter .32s var(--ease); }
+  @keyframes enter { from { opacity:0; transform:translateY(8px); } }
+  .card.drop { outline:2px dashed var(--accent); outline-offset:2px; }
+
+  /* the session board: a call sheet of every running session */
+  #sessions { position:sticky; top:56px; height:calc(100vh - 56px); display:flex; flex-direction:column; padding:0 24px 24px;
+    border-left:1px solid var(--line); }
+  #sessions .colhead { position:static; }
+  #sgrid { flex:1; min-height:0; display:grid; gap:8px; align-content:start; padding-top:4px; }
+  #sgrid .none { color:var(--text2); }
+  .scard { container-type:size; position:relative; overflow:hidden; text-align:left; cursor:pointer;
+    background:var(--card); border:1px solid var(--line); border-radius:12px;
+    padding:clamp(8px, 8cqh, 16px) clamp(12px, 5cqw, 16px); display:flex; flex-direction:column; gap:clamp(0px, 3cqh, 4px);
+    transition:border-color .15s var(--ease), background-color .15s var(--ease); }
+  .scard:hover { background:var(--raised); }
+  .scard.sel { border-color:var(--line2); background:var(--raised); box-shadow:inset 0 1px 0 rgba(255,255,255,.06); }
+  .scard.waiting { border-color:color-mix(in srgb, var(--accent) 45%, transparent); }
+  .scard.waiting::before { content:""; position:absolute; left:0; top:12px; bottom:12px; width:3px; border-radius:0 2px 2px 0; background:var(--accent); }
+  .scard .sn { font-size:clamp(12px, 12cqh, 15px); line-height:1.35; font-weight:500; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; overflow-wrap:anywhere; }
+  .scard .sp, .scard .si { font:clamp(11px, 9cqh, 12px)/1.35 var(--mono); color:var(--dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .scard .ss { font:clamp(11px, 10cqh, 13px)/1.35 var(--mono); font-variant-numeric:tabular-nums; color:var(--text2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:auto; }
+  .scard:not(.busy) .ss { color:var(--dim); }
+  .scard > * { flex-shrink:0; }
+  /* many sessions, short cards: one line for the name, and the project goes (it's in the tooltip) */
+  @container (max-height:120px) { .scard .sn { -webkit-line-clamp:1; } .scard .sp { display:none; } }
+  .scard .dot { display:inline-block; width:6px; height:6px; border-radius:50%; margin-right:8px; vertical-align:1px; border:1px solid currentColor; }
+  .scard.busy .dot { background:var(--ok); border-color:var(--ok); animation:live 2s var(--ease) infinite; }  /* the only loop: it is live */
+  @keyframes live { 50% { opacity:.35; } }
+  .scard.waiting .si { color:var(--accent-ink); }
+  /* idle: how far the prompt cache is toward going cold (waking a cold session re-reads its whole context) */
+  .scard .sb { position:absolute; left:0; right:0; bottom:0; height:2px; background:var(--line); }
+  .scard .sb i { display:block; height:100%; background:var(--dim); opacity:.6; }
+  .scard .sb.cold i { background:var(--redo); opacity:1; }
+  @media (max-width:1099px) {
+    .split { grid-template-columns:minmax(0,1fr); }
+    #sessions { order:-1; position:static; height:auto; border-left:0; border-bottom:1px solid var(--line); padding:0 16px 12px; }
+    .colhead { top:56px; } #sessions .colhead { height:48px; }
+    .bar { padding:0 16px; }
+    /* one row that scrolls sideways, so the inbox stays on the first screen however many sessions there are */
+    #sgrid { display:flex; overflow-x:auto; scroll-snap-type:x proximity; padding-bottom:4px; }
+    .scard { flex:0 0 200px; scroll-snap-align:start; container-type:normal; padding:12px; gap:4px; }  /* sized by their text here */
+    .scard .sn { font-size:13px; } .scard .sp, .scard .si { font-size:12px; } .scard .ss { font-size:12px; margin-top:4px; }
+    #inbox { padding:0 16px 48px; }
+    .card { padding:16px; }
+  }
+  @media (prefers-reduced-motion: reduce) { .card.new, .scard.busy .dot { animation:none; } }
 </style>
-<header>
+<header class="bar">
   <svg viewBox="-4 -4 200 152" aria-hidden="true"><rect width="192" height="144" rx="10" fill="#0f2533" stroke="#ffcc33" stroke-width="8"/><rect width="16" height="144" rx="4" fill="#ffcc33"/><rect x="40" y="30" width="120" height="14" rx="4" fill="#6f8d9c"/><rect x="40" y="58" width="88" height="14" rx="4" fill="#6f8d9c"/><rect x="40" y="96" width="46" height="26" rx="6" fill="#3ddc97"/><rect x="96" y="96" width="46" height="26" rx="6" fill="#ffb454"/></svg>
-  <div><h1>Review inbox</h1><div class="sub" id="sub"></div></div>
-  <nav id="tabs"></nav>
+  <h1>Review inbox</h1><span class="sub" id="sub"></span>
 </header>
+<div class="split">
+<main id="inbox">
+<div class="colhead"><h2>Inbox</h2><nav id="tabs"></nav></div>
 <div id="list"></div>
 <button id="more" hidden></button>
+</main>
+<aside id="sessions"><div class="colhead"><h2>Sessions</h2><span class="count" id="scount"></span></div><div id="sgrid"></div></aside>
+</div>
 <script>
 const TABS = { open: "Open", answered: "Answered" };
 const PAGE = 20;  // a long Answered history with hundreds of clips froze the page when drawn all at once
 let tab = "open", data = [], limit = PAGE, seen = null, proj = null;  // proj: show one project's items (click its badge)
+let sess = null;  // show one session's items (click its card)
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 // escape, then turn http(s) URLs into links (trailing punctuation stays text)
 const linkify = s => esc(s).replace(/https?:\/\/[^\s<>"]*[^\s<>".,;:!?)\]']/g, u => `<a href="${u}" target="_blank">${u}</a>`);
 const match = (i, k) => (k === "open") === (i.status === "open");
-const show = i => match(i, tab) && (!proj || i.project === proj);
+const show = i => match(i, tab) && (!proj || i.project === proj) && (!sess || i.sid === sess);
 
 function media(i) {
   if (i.pruned) return `<div class="files">Media deleted ${esc(i.pruned)}, after the retention period. The verdict stays.</div>`;
@@ -120,11 +207,11 @@ function card(i) {
   const pick = picked(i), opts = q && i.options?.length ? `<div class="opts">${i.options.map((o, k) =>
     `<button class="opt${o === pick ? " on" : ""}" data-opt="${esc(o)}"><span class="n">${k + 1}</span><span>${esc(o)}</span></button>`).join("")}</div>` : "";
   return `<div class="card ${esc(i.status)}${i.waiting ? " waiting" : ""}" data-id="${esc(i.id)}">
-    <div class="head">${q ? `<span class="chip qchip">Question</span>` : ""}<span class="title">${linkify(i.title)}</span>
-      <span class="chip wbadge">agent waiting</span>${label ? `<span class="chip s-${esc(i.status)}">${label}</span>` : ""}
-      ${i.project ? `<button class="chip pchip" data-proj="${esc(i.project)}" title="${esc(i.project_dir)}">${esc(i.project)}</button>` : ""}
-      ${i.topic ? `<span class="chip">${esc(i.topic)}</span>` : ""}
-      <span class="meta">${i.by ? esc(i.by) + "&ensp;" : ""}${esc(i.created)}</span></div>
+    <div class="head">${q ? `<span class="tag">Question</span>` : ""}<span class="title">${linkify(i.title)}</span>
+      <span class="tag wbadge">waiting on you</span>${label ? `<span class="tag s-${esc(i.status)}">${label}</span>` : ""}
+      ${i.project ? `<button class="tag pchip" data-proj="${esc(i.project)}" title="${esc(i.project_dir)}">${esc(i.project)}</button>` : ""}
+      ${i.topic ? `<span class="tag">${esc(i.topic)}</span>` : ""}
+      <span class="tag meta">${i.by ? esc(i.by) + " · " : ""}${esc(i.created)}</span></div>
     ${i.how ? `<div class="how">${linkify(i.how)}</div>` : ""}
     ${opts}
     ${media(i)}
@@ -133,7 +220,7 @@ function card(i) {
       ${i.reply?.length ? `<div class="reply">${i.reply.map(r => `<span class="thumb"><a href="/media/${encodeURIComponent(i.id)}/${encodeURIComponent(r)}" target="_blank"><img src="/media/${encodeURIComponent(i.id)}/${encodeURIComponent(r)}" loading="lazy"></a><button class="x" data-unreply="${esc(r)}" title="Remove this image">×</button></span>`).join("")}</div>` : ""}
       <div class="pend">${pendThumbs(i.id)}</div>
       <div class="acts">${acts}
-        <span class="spacer"></span><button class="b-dis" data-pick>Attach image</button><button class="b-dis" data-s="dismissed">Dismiss</button>
+        <span class="spacer"></span><button class="b-dis" data-pick>Attach image</button><button class="b-dis" data-mic>${mic?.id === i.id ? "Stop dictating" : "Dictate"}</button><button class="b-dis" data-s="dismissed">Dismiss</button>
         <input type="file" accept="image/*" multiple hidden></div>
     </div></div>`;
 }
@@ -161,7 +248,7 @@ function flip(change) {
   if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
   for (const c of list.querySelectorAll(".card:not([hidden])")) {
     const d = was.has(c.dataset.id) ? was.get(c.dataset.id) - at(c) : 0;
-    if (d) c.animate([{ transform: `translateY(${d}px)` }, { transform: "none" }], { duration: 420, easing: "cubic-bezier(.2,.8,.2,1)" });
+    if (d) c.animate([{ transform: `translateY(${d}px)` }, { transform: "none" }], { duration: 400, easing: "cubic-bezier(.22,1,.36,1)" });
   }
 }
 
@@ -172,7 +259,8 @@ function draw() {
     `<button class="${k === tab ? "on" : ""}" data-tab="${k}">${v}<span class="n">${data.filter(i => match(i, k) && (!proj || i.project === proj)).length}</span></button>`).join("");
   const open = data.filter(i => i.status === "open").length, w = data.filter(i => i.waiting).length;
   document.getElementById("sub").textContent = open ? `${open} waiting on you` + (w ? `, ${w} agent${w > 1 ? "s" : ""} on hold` : "") : "All caught up";
-  if (proj) document.getElementById("sub").insertAdjacentHTML("beforeend", `<br>Only ${esc(proj)}. <button data-allproj>Show every project</button>`);
+  if (proj) document.getElementById("sub").insertAdjacentHTML("beforeend", ` · only ${esc(proj)} <button data-allproj>Show all</button>`);
+  if (sess) document.getElementById("sub").insertAdjacentHTML("beforeend", ` · only ${esc(sessName(sess))} <button data-sid="">Show all</button>`);
   // Keyed: unchanged cards keep their DOM node, so loaded media doesn't re-layout and shove the page around,
   // playing clips keep playing, and dismissing a card just lets the ones below move up.
   // Never detach a card that stays: moving a node drops fullscreen and the browser's scroll anchor.
@@ -210,6 +298,61 @@ document.addEventListener("input", e => {
 const picks = {};
 const picked = i => i.status === "open" ? picks[i.id]
   : (i.options || []).find(o => i.note === o || i.note?.startsWith(o + " - "));
+
+// Dictation: click Dictate, talk, click Stop; the server runs whisper.cpp (+ Silero VAD) and the text is appended to the note.
+// The first click says what's missing: whisper-server to install, or the model to download (only after you say yes).
+let mic = null;  // {id, rec} while recording
+const micBtn = id => document.querySelector(`.card[data-id="${CSS.escape(id)}"] [data-mic]`);
+async function dictate(c) {
+  if (mic) { const was = mic.id; mic.rec.stop(); return was === c.dataset.id || dictate(c); }  // a second card's Dictate stops the first
+  if (!await sttReady(c.dataset.id)) return;
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+  catch (e) { return alert("No microphone: " + e.message + (isSecureContext ? "" : " (the mic needs https or localhost)")); }
+  const rec = new MediaRecorder(stream), chunks = [], id = c.dataset.id;
+  rec.ondataavailable = e => chunks.push(e.data);
+  rec.onstop = async () => {
+    stream.getTracks().forEach(t => t.stop());
+    mic = null;
+    const b = micBtn(id); if (b) { b.textContent = "Transcribing..."; b.disabled = true; }
+    let res;
+    try { res = await (await fetch("/api/stt", { method: "POST", headers: { "Content-Type": rec.mimeType || "audio/webm" }, body: new Blob(chunks) })).json(); }
+    catch (e) { res = { error: e.message }; }
+    const b2 = micBtn(id); if (b2) { b2.textContent = "Dictate"; b2.disabled = false; b2.style.background = ""; }
+    if (res.error) return alert("Dictation failed: " + res.error);
+    if (!res.text) return;
+    const ta = document.querySelector(`.card[data-id="${CSS.escape(id)}"] textarea`);
+    const v = ((ta ? ta.value : drafts[id] ?? "").trimEnd() + " " + res.text).trim();
+    drafts[id] = v; keepDrafts();
+    if (ta) ta.value = v;
+  };
+  rec.start();
+  mic = { id, rec };
+  const b = micBtn(id); b.textContent = "Stop dictating"; b.style.background = "var(--redo)";
+}
+async function sttReady(id) {
+  const get = async () => (await fetch("/api/stt")).json();
+  let s = await get();
+  if (s.missing.length) return alert(`Dictation runs on your machine and needs:
+
+` + s.missing.join(`
+
+`)), false;
+  if (s.ready) return true;
+  if (!s.dl?.busy) {
+    if (!confirm(`Dictation runs on your machine and needs its speech model (${s.need.join(" + ")}, ${s.mb ?? "?"} MB from huggingface.co, ` +
+                 `saved in ${s.cache}). Download it now?`)) return false;
+    await fetch("/api/stt/download", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+  }
+  const show = (t, off) => { const b = micBtn(id); if (b) { b.textContent = t; b.disabled = off; } };
+  for (;;) {  // progress on the button; when it's done, the next click records
+    await new Promise(r => setTimeout(r, 500));
+    s = await get();
+    if (s.ready) return show("Dictate", false), false;
+    if (!s.dl?.busy) return show("Dictate", false), alert("Model download failed: " + (s.dl?.error || "stopped")), false;
+    show(`Downloading ${Math.floor(s.dl.done / 1e6)} / ${s.mb ?? "?"} MB`, true);
+  }
+}
 
 // Images attached to an answer but not saved yet (data URLs); they go up with the next button press.
 const pending = {};
@@ -255,6 +398,7 @@ document.addEventListener("click", async e => {
   const t = e.target.closest("button") || e.target;  // tabs and option rows have nested spans
   if (t.id === "more") { limit += PAGE; return render(); }
   if (t.dataset.proj !== undefined || t.dataset.allproj !== undefined) { proj = t.dataset.proj ?? null; limit = PAGE; return render(); }
+  if (t.dataset.sid !== undefined) { sess = t.dataset.sid && t.dataset.sid !== sess ? t.dataset.sid : null; limit = PAGE; drawSessions(); return render(); }
   if (t.classList.contains("opt")) {
     const c = t.closest(".card"), v = t.dataset.opt;
     c.querySelector(".msg").textContent = "";
@@ -265,6 +409,7 @@ document.addEventListener("click", async e => {
   if (t.dataset.tab) { tab = t.dataset.tab; limit = PAGE; try { localStorage.reviewTab = tab; } catch {} return render(); }
   const c = t.closest(".card");
   if (t.dataset.pick !== undefined) return c.querySelector("input[type=file]").click();
+  if (t.dataset.mic !== undefined) return dictate(c);
   if (t.dataset.rm !== undefined) { pending[c.dataset.id].splice(+t.dataset.rm, 1); return showPend(c); }
   if (!t.dataset.s && !t.dataset.unreply) return;
   const typed = c.querySelector("textarea").value.trim();
@@ -278,11 +423,71 @@ document.addEventListener("click", async e => {
   const upd = held(await r.json());
   if (!t.dataset.unreply) { delete drafts[upd.id]; delete pending[upd.id]; delete picks[upd.id]; keepDrafts(); }  // removing an image keeps unsaved typing
   data = data.map(i => i.id === upd.id ? upd : i);
-  t.blur(); render();
+  t.blur(); render(); loadSessions();  // its session stops waiting on you now, not at the next poll
 });
 
 try { tab = TABS[localStorage.reviewTab] ? localStorage.reviewTab : tab; } catch {}
 load(); setInterval(load, 5000);
+
+// Session cards: every session the hooks have seen, working or idle, and what it has in the inbox. They shrink to fit the pane.
+let S = { now: 0, warm_min: 50, sessions: [] }, sAt = 0;
+const fmt = d => { d = Math.max(0, d | 0); return [d / 3600, d % 3600 / 60, d % 60].map(n => String(n | 0).padStart(2, "0")).join(":"); };  // timecode
+const sessName = sid => { const s = S.sessions.find(x => x.sid === sid); return s?.name || s?.project || sid.slice(0, 8); };
+async function loadSessions() {
+  try { S = await (await fetch("/api/sessions")).json(); sAt = performance.now(); drawSessions(); } catch {}
+}
+function drawSessions() {
+  const now = S.now + (performance.now() - sAt) / 1000, g = document.getElementById("sgrid");
+  const rank = s => s.waiting ? 0 : s.busy ? 1 : 2;
+  const list = S.sessions.slice().sort((a, b) => rank(a) - rank(b) || (a.busy ? a.turn - b.turn : b.last - a.last));
+  const busy = list.filter(s => s.busy).length, wait = list.filter(s => s.waiting).length;
+  document.getElementById("scount").textContent = list.length
+    ? `${busy} working · ${list.length - busy} idle` + (wait ? ` · ${wait} waiting` : "") : "";
+  if (!list.length) return g.innerHTML = `<div class="none">No sessions yet. Each Claude Code session with this plugin shows up here.</div>`;
+  fitSessions(g, list.length);
+  const projects = new Set(list.map(s => s.project)).size > 1;
+  // keyed like the inbox cards: a card is rebuilt only when what it says changes, so its pulse doesn't restart every tick
+  const old = new Map([...g.querySelectorAll(".scard")].map(c => [c.dataset.sid, c]));
+  const nodes = list.map(s => {
+    const idle = now - s.last, cold = !s.busy && idle >= S.warm_min * 60;
+    const inbox = s.waiting ? "waiting on you" : s.open ? `${s.open} open in the inbox` : "";
+    const name = s.name || s.project || s.sid.slice(0, 8), key = JSON.stringify([name, projects, s.busy, s.waiting, inbox, s.sid === sess, cold]);
+    let c = old.get(s.sid);
+    if (!c || c._key !== key) {
+      const t = document.createElement("template");
+      t.innerHTML = `<button class="scard${s.busy ? " busy" : ""}${s.waiting ? " waiting" : ""}${s.sid === sess ? " sel" : ""}" data-sid="${esc(s.sid)}"
+        title="${esc(s.project_dir || "")}: click to show only its items"><div class="sn">${esc(name)}</div>
+        ${projects && s.name ? `<div class="sp">${esc(s.project)}</div>` : ""}<div class="ss"><span class="dot"></span><span class="st"></span></div>
+        ${inbox ? `<div class="si">${inbox}</div>` : ""}${s.busy ? "" : `<div class="sb${cold ? " cold" : ""}"><i></i></div>`}</button>`;
+      const n = t.content.firstChild;
+      n._key = key;
+      if (c) c.replaceWith(n);
+      c = n;
+    }
+    c.querySelector(".st").textContent = s.busy ? "working " + fmt(now - s.turn) : "idle " + fmt(idle) + (cold ? " · cache cold" : "");
+    const bar = c.querySelector(".sb i");
+    if (bar) bar.style.width = Math.min(100, idle / (S.warm_min * 60) * 100) + "%";
+    return c;
+  });
+  const keep = new Set(nodes);
+  [...g.children].forEach(c => keep.has(c) || c.remove());
+  nodes.forEach((n, k) => { if (g.children[k] !== n) g.insertBefore(n, g.children[k] || null); });
+}
+// as many columns as keeps each card biggest (at a card's shape, ~2.2:1, so a name fits on a line or two), capped so two sessions don't make two billboards
+function fitSessions(g, n) {
+  if (matchMedia("(max-width:1099px)").matches) return;  // the narrow layout's CSS takes over
+  const W = g.clientWidth, H = g.clientHeight, gap = 10, MAXH = 150, MAXW = 360;
+  let cols = 1, best = 0;
+  for (let c = 1; c <= n; c++) {
+    const r = Math.ceil(n / c), w = Math.min(MAXW, (W - gap * (c - 1)) / c), h = Math.min(MAXH, (H - gap * (r - 1)) / r), sz = Math.min(w / 2.2, h);
+    if (sz >= best) { best = sz; cols = c; }
+  }
+  const rows = Math.ceil(n / cols);
+  g.style.gridTemplateColumns = `repeat(${cols}, minmax(0, ${Math.min(MAXW, (W - gap * (cols - 1)) / cols)}px))`;
+  g.style.gridAutoRows = Math.max(44, Math.min(MAXH, (H - gap * (rows - 1)) / rows)) + "px";
+}
+loadSessions(); setInterval(loadSessions, 3000); setInterval(drawSessions, 1000);
+addEventListener("resize", drawSessions);
 
 // An open tab keeps running old code after an update: reload when page.html changes, never mid-answer (drafts survive in localStorage).
 const pageNow = () => fetch(location.pathname, { cache: "no-store" }).then(r => r.ok ? r.text() : null).catch(() => null);

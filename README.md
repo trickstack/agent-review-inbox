@@ -105,6 +105,11 @@ Nothing to configure. The SessionStart hook tells the agent the inbox exists, an
 protocol. The page starts on demand the first time something is posted: http://127.0.0.1:7700/. It's one inbox for all your
 projects: each card shows which project it came from, and clicking that badge shows only that project.
 
+The right half of the page shows every running session: its name, how long it has been working or idle (and when its
+prompt cache has gone cold), and what it has in the inbox. A session blocked on your answer turns yellow like its card.
+Click a session to show only its items. The hooks keep this up to date; a session's name comes from Claude Code when it's
+known, else from its first prompt.
+
 Questions land there too. When an agent needs you to decide something, it posts the question with `review.py ask`, optionally with one-click options, instead of asking in a chat you might never look at. The Stop hook catches a turn that ends on a question asked in chat.
 
 Clips are rendered, not filmed off your screen, so you can keep watching something fullscreen while agents work:
@@ -142,6 +147,20 @@ screen recorder's replay buffer). Point `clip` at it:
 export REVIEW_INBOX_CLIP_CMD='my-recorder --last {seconds} --out "{out}"'
 ```
 
+### Dictation
+
+A Dictate button on each card turns speech into note text, on your machine, with [whisper.cpp](https://github.com/ggml-org/whisper.cpp)
+and Silero VAD. Nothing is downloaded or run until you ask. The first click says what's missing:
+
+- `whisper-server` (and ffmpeg) you install yourself: `brew install whisper-cpp`, or unzip `whisper-bin-x64.zip` (Windows) or
+  `whisper-bin-ubuntu-x64.tar.gz` from the [releases](https://github.com/ggml-org/whisper.cpp/releases) and point
+  `REVIEW_INBOX_WHISPER` at that folder. The inbox never downloads a program for you.
+- The speech model it offers to download, with its size, and shows the progress on the button: `large-v3-turbo-q5_0`
+  (~550 MB) plus Silero (1 MB) from Hugging Face into `~/.cache/review-inbox`. Set `REVIEW_INBOX_WHISPER_MODEL` to another
+  [model name](https://huggingface.co/ggerganov/whisper.cpp) or to a `.bin` you already have.
+
+The server starts on the first dictation and stops after 10 idle minutes.
+
 ### Settings
 
 | Variable | Default | |
@@ -154,6 +173,9 @@ export REVIEW_INBOX_CLIP_CMD='my-recorder --last {seconds} --out "{out}"'
 | `REVIEW_INBOX_CLIP_CMD` | | custom capture command |
 | `REVIEW_INBOX_DESKTOP` | | `1` allows screen and window recording and desktop steps (they take over your screen and mouse) |
 | `REVIEW_INBOX_KEEP_DAYS` | `7` | answered items lose their videos and images after this many days; `0` keeps everything |
+| `REVIEW_INBOX_WHISPER` | | `whisper-server`, or the folder holding it, for [dictation](#dictation) |
+| `REVIEW_INBOX_WHISPER_MODEL` | `large-v3-turbo-q5_0` | a whisper.cpp model name (downloaded once) or a `.bin` path |
+| `REVIEW_INBOX_STT_PORT` | page port + 1 | where `whisper-server` listens |
 | `REVIEW_INBOX_NO_TOAST` | | no desktop notifications |
 | `REVIEW_INBOX_NO_SERVER` | | `add` doesn't start the page server (run `review.py serve` yourself) |
 | `REVIEW_INBOX_SESSION` | | the session id for agents without `CLAUDE_CODE_SESSION_ID` (same as `--session`) |
