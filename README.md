@@ -1,39 +1,30 @@
-<div align="center">
-
 <h1><img src="assets/logo.svg" alt="" height="26">&nbsp; Agent Review Inbox</h1>
 
-<p><b>See and hear what every session built, in one place.</b></p>
+A page on your machine where every coding agent session you run shows you its work, asks you things and gets your answer
+back, next to a live board of what each session is doing.
 
-<p>
-  <a href="https://ko-fi.com/trickstack"><img src="https://img.shields.io/badge/Support%20me%20on%20Ko--fi-FF5E5B?logo=ko-fi&logoColor=white" alt="Support me on Ko-fi"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license"></a>
-  <a href="#install"><img src="https://img.shields.io/badge/Claude%20Code-plugin-D97757" alt="Claude Code plugin"></a>
-  <a href="docs/codex-test.md"><img src="https://img.shields.io/badge/Codex-experimental-lightgrey" alt="Codex (experimental)"></a>
-</p>
+<img src="assets/hero.webp" alt="The inbox in dark mode: a board of ten sessions on the left, working or waiting on you, and the inbox on the right. A chart arrives from one session, gets an OK and that session goes back to work; another asks a question in its chat and turns yellow; a third finishes and dims to done; a question about a button label gets answered." width="900">
 
-<!-- HERO: the real inbox with three sessions waiting on you, as a seamless loop. Keep it under ~10 MB so GitHub plays it inline. -->
-<img src="assets/hero.webp" alt="See and hear what every session built, in one place: the inbox with a game video from game-agent, a comparison from settings-agent and a question from web-agent, all waiting on you" width="820">
+Run five sessions at once and the hard part stops being the code. Which one finished, which one is stuck on a question,
+and what did it actually change? One page answers all three:
 
-</div>
+- **Takes instead of tabs.** A session posts what it built: a clip it rendered in a headless browser or your engine's own
+  recorder, stills, a sound, options side by side. You answer OK, or Redo with a note you type, dictate or draw on a
+  pasted screenshot.
+- **Questions with one-click answers.** A session that needs a decision asks in the inbox, not in a chat you'll never
+  scroll back to.
+- **Answers that get acted on.** The session waits in the background and wakes when you answer. Its Stop hook won't let
+  it end a turn with your verdict unread or ignored.
+- **A board of every session.** Working or idle, when its prompt cache goes cold, yellow when it needs you (an item, or a
+  question it asked in the chat), and off the board once it's done.
+- **Around it:** desktop notifications, dictation that runs on your machine, and reviewing from your phone over your own
+  private network.
 
-Running a bunch of agent sessions at once? Every one of them reports to the same inbox in your browser: a video of what
-it built, a side-by-side of options, a sound, or a question it needs you to answer. Hit OK, Redo with a note, or pick an
-answer, and it goes straight back to the session that asked, which has to act on it before it can call the task done.
-
-No more tab-hopping between terminals to find out who's waiting on you, and no launching the app yourself to see what
-changed. It shines for anything you judge by looking, listening or playing (a UI change, an animation, game feel, a
-sound), but any decision a session needs from you lands in the same place.
-
-A plugin for **Claude Code** (Codex: experimental): one Python file (stdlib only), one HTML page, three hooks and a skill.
+It shines for anything you judge by looking, listening or playing: a UI change, an animation, game feel, a sound. One
+Python file (stdlib only), one HTML page, four hooks and a skill, as a plugin for **Claude Code** (Codex: experimental).
 The CLI works with any agent that can run a shell command.
 
-## Why
-
-With one session you can watch the terminal. With five, the hard part stops being the code and becomes keeping up: which
-one finished, which one is stuck on a question, and what did it actually change? Agents are good at changing code and bad
-at knowing whether the result is up to your standards, so without a channel for that you get "please check the look"
-buried in a forgotten tab and "needs a human check" lines rotting in notes files. The inbox gives every session one place
-to report to, and closes the loop:
+## How the loop works
 
 1. **Post.** The agent records a clip or still (`review.py clip`, `shot`, or any media it made), checks the contact sheet
    itself, and posts it with what to look at. Or it posts a question, with one-click answers.
@@ -45,10 +36,6 @@ to report to, and closes the loop:
    cold while it waits.
 5. **Stay honest.** The Stop hook won't let the agent end its turn while it has an unread verdict, an unanswered Redo or OK,
    or an open item with nothing waiting for the answer.
-
-## What it looks like
-
-https://github.com/user-attachments/assets/90763798-e909-4e35-9de8-2faec85fd448
 
 ## Install
 
@@ -76,7 +63,7 @@ Or try it for one session without installing: `claude --plugin-dir /path/to/agen
 codex plugin marketplace add trickstack/agent-review-inbox
 ```
 
-Then install it from `/plugins` in `codex`, start a new session, and trust its three hooks in `/hooks` (Codex skips
+Then install it from `/plugins` in `codex`, start a new session, and trust its four hooks in `/hooks` (Codex skips
 plugin hooks until you do). Codex support is experimental: nobody has run it end to end yet. See [docs/codex-test.md](docs/codex-test.md).
 
 **Any other agent**
