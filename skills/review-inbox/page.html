@@ -37,7 +37,7 @@
   .sub::before { content:""; display:inline-block; width:1px; height:16px; background:var(--line2); margin:0 12px 0 4px; vertical-align:-3px; }
   .sub:empty::before { display:none; }
   .sub button { color:var(--link); background:none; border:0; padding:0; cursor:pointer; }
-  .split { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); max-width:1600px; margin:0 auto; }
+  .split { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); }  /* sessions left, inbox right: the scrollbar sits by the inbox */
   #inbox { min-width:0; padding:0 24px 48px; }
   .colhead { position:sticky; top:56px; z-index:1; height:56px; display:flex; align-items:center; gap:12px; background:var(--bg); }
   .colhead h2 { margin:0; font-size:15px; line-height:24px; font-weight:500; }
@@ -120,8 +120,8 @@
   .card.drop { outline:2px dashed var(--accent); outline-offset:2px; }
 
   /* the session board: a call sheet of every running session */
-  #sessions { position:sticky; top:56px; height:calc(100vh - 56px); display:flex; flex-direction:column; padding:0 24px 24px;
-    border-left:1px solid var(--line); }
+  #sessions { position:sticky; top:56px; height:calc(100vh - 56px); display:flex; flex-direction:column; padding:0 24px 24px; order:-1;
+    border-right:1px solid var(--line); }
   #sessions .colhead { position:static; }
   #sgrid { flex:1; min-height:0; display:grid; gap:8px; align-content:start; padding-top:4px; }
   #sgrid .none { color:var(--text2); }
@@ -137,6 +137,12 @@
   .scard .sp, .scard .si { font:clamp(11px, 9cqh, 12px)/1.35 var(--mono); color:var(--dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .scard .ss { font:clamp(11px, 10cqh, 13px)/1.35 var(--mono); font-variant-numeric:tabular-nums; color:var(--text2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:auto; }
   .scard:not(.busy) .ss { color:var(--dim); }
+  .scard.done { opacity:.6; } .scard.done:hover { opacity:1; }
+  .sx { position:absolute; top:4px; right:4px; width:24px; height:24px; padding:0; border:0; border-radius:6px; cursor:pointer;
+    background:transparent; color:var(--dim); font:16px/24px var(--sans); opacity:0; transition:opacity .15s var(--ease), background-color .15s var(--ease); }
+  .scard:hover .sx, .scard:focus-within .sx { opacity:1; }
+  .sx:hover { background:var(--line2); color:var(--text); }
+  @media (hover:none) { .sx { opacity:.7; } }
   .scard > * { flex-shrink:0; }
   /* many sessions, short cards: one line for the name, and the project goes (it's in the tooltip) */
   @container (max-height:120px) { .scard .sn { -webkit-line-clamp:1; } .scard .sp { display:none; } }
@@ -150,7 +156,7 @@
   .scard .sb.cold i { background:var(--redo); opacity:1; }
   @media (max-width:1099px) {
     .split { grid-template-columns:minmax(0,1fr); }
-    #sessions { order:-1; position:static; height:auto; border-left:0; border-bottom:1px solid var(--line); padding:0 16px 12px; }
+    #sessions { order:-1; position:static; height:auto; border-right:0; border-bottom:1px solid var(--line); padding:0 16px 12px; }
     .colhead { top:56px; } #sessions .colhead { height:48px; }
     .bar { padding:0 16px; }
     /* one row that scrolls sideways, so the inbox stays on the first screen however many sessions there are */
@@ -398,7 +404,9 @@ document.addEventListener("click", async e => {
   const t = e.target.closest("button") || e.target;  // tabs and option rows have nested spans
   if (t.id === "more") { limit += PAGE; return render(); }
   if (t.dataset.proj !== undefined || t.dataset.allproj !== undefined) { proj = t.dataset.proj ?? null; limit = PAGE; return render(); }
-  if (t.dataset.sid !== undefined) { sess = t.dataset.sid && t.dataset.sid !== sess ? t.dataset.sid : null; limit = PAGE; drawSessions(); return render(); }
+  if (t.dataset.hide) return hideSession(t.dataset.hide);
+  const sc = t.dataset.sid !== undefined ? t : e.target.closest(".scard");  // a session card, or the bar's "Show all"
+  if (sc) { sess = sc.dataset.sid && sc.dataset.sid !== sess ? sc.dataset.sid : null; limit = PAGE; drawSessions(); return render(); }
   if (t.classList.contains("opt")) {
     const c = t.closest(".card"), v = t.dataset.opt;
     c.querySelector(".msg").textContent = "";
@@ -438,11 +446,12 @@ async function loadSessions() {
 }
 function drawSessions() {
   const now = S.now + (performance.now() - sAt) / 1000, g = document.getElementById("sgrid");
-  const rank = s => s.waiting ? 0 : s.busy ? 1 : 2;
+  // needs you: blocked on an inbox item, or its last turn asked you something in the chat
+  const needs = s => s.waiting || !!s.asks, rank = s => needs(s) ? 0 : s.busy ? 1 : s.done ? 3 : 2;
   const list = S.sessions.slice().sort((a, b) => rank(a) - rank(b) || (a.busy ? a.turn - b.turn : b.last - a.last));
-  const busy = list.filter(s => s.busy).length, wait = list.filter(s => s.waiting).length;
+  const busy = list.filter(s => s.busy).length, wait = list.filter(needs).length, done = list.filter(s => s.done && !needs(s)).length;
   document.getElementById("scount").textContent = list.length
-    ? `${busy} working · ${list.length - busy} idle` + (wait ? ` · ${wait} waiting` : "") : "";
+    ? `${busy} working · ${list.length - busy - done} idle` + (wait ? ` · ${wait} waiting` : "") + (done ? ` · ${done} done` : "") : "";
   if (!list.length) return g.innerHTML = `<div class="none">No sessions yet. Each Claude Code session with this plugin shows up here.</div>`;
   fitSessions(g, list.length);
   const projects = new Set(list.map(s => s.project)).size > 1;
@@ -450,21 +459,23 @@ function drawSessions() {
   const old = new Map([...g.querySelectorAll(".scard")].map(c => [c.dataset.sid, c]));
   const nodes = list.map(s => {
     const idle = now - s.last, cold = !s.busy && idle >= S.warm_min * 60;
-    const inbox = s.waiting ? "waiting on you" : s.open ? `${s.open} open in the inbox` : "";
-    const name = s.name || s.project || s.sid.slice(0, 8), key = JSON.stringify([name, projects, s.busy, s.waiting, inbox, s.sid === sess, cold]);
+    const inbox = s.waiting ? "waiting on you" : s.asks ? "asks: " + s.asks : s.open ? `${s.open} open in the inbox` : "";
+    const fin = s.done && !needs(s), name = s.name || s.project || s.sid.slice(0, 8);
+    const key = JSON.stringify([name, projects, s.busy, needs(s), fin, inbox, s.sid === sess, cold]);
     let c = old.get(s.sid);
     if (!c || c._key !== key) {
       const t = document.createElement("template");
-      t.innerHTML = `<button class="scard${s.busy ? " busy" : ""}${s.waiting ? " waiting" : ""}${s.sid === sess ? " sel" : ""}" data-sid="${esc(s.sid)}"
-        title="${esc(s.project_dir || "")}: click to show only its items"><div class="sn">${esc(name)}</div>
+      t.innerHTML = `<div class="scard${s.busy ? " busy" : ""}${needs(s) ? " waiting" : ""}${fin ? " done" : ""}${s.sid === sess ? " sel" : ""}" data-sid="${esc(s.sid)}"
+        role="button" tabindex="0" title="${esc(s.asks || s.project_dir || "")}"><div class="sn">${esc(name)}</div>
         ${projects && s.name ? `<div class="sp">${esc(s.project)}</div>` : ""}<div class="ss"><span class="dot"></span><span class="st"></span></div>
-        ${inbox ? `<div class="si">${inbox}</div>` : ""}${s.busy ? "" : `<div class="sb${cold ? " cold" : ""}"><i></i></div>`}</button>`;
+        ${inbox ? `<div class="si">${esc(inbox)}</div>` : ""}${s.busy || fin ? "" : `<div class="sb${cold ? " cold" : ""}"><i></i></div>`}
+        <button class="sx" data-hide="${esc(s.sid)}" title="Remove from the board (it comes back when the session does something)" aria-label="Remove ${esc(name)} from the board">×</button></div>`;
       const n = t.content.firstChild;
       n._key = key;
       if (c) c.replaceWith(n);
       c = n;
     }
-    c.querySelector(".st").textContent = s.busy ? "working " + fmt(now - s.turn) : "idle " + fmt(idle) + (cold ? " · cache cold" : "");
+    c.querySelector(".st").textContent = s.busy ? "working " + fmt(now - s.turn) : fin ? "done" : "idle " + fmt(idle) + (cold ? " · cache cold" : "");
     const bar = c.querySelector(".sb i");
     if (bar) bar.style.width = Math.min(100, idle / (S.warm_min * 60) * 100) + "%";
     return c;
@@ -486,6 +497,15 @@ function fitSessions(g, n) {
   g.style.gridTemplateColumns = `repeat(${cols}, minmax(0, ${Math.min(MAXW, (W - gap * (cols - 1)) / cols)}px))`;
   g.style.gridAutoRows = Math.max(44, Math.min(MAXH, (H - gap * (rows - 1)) / rows)) + "px";
 }
+async function hideSession(sid) {
+  await fetch("/api/sessions/hide", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sid }) });
+  S.sessions = S.sessions.filter(s => s.sid !== sid);
+  if (sess === sid) { sess = null; render(); }
+  drawSessions();
+}
+addEventListener("keydown", e => {  // session cards are role=button: Enter and Space click them
+  if ((e.key === "Enter" || e.key === " ") && e.target.classList?.contains("scard")) { e.preventDefault(); e.target.click(); }
+});
 loadSessions(); setInterval(loadSessions, 3000); setInterval(drawSessions, 1000);
 addEventListener("resize", drawSessions);
 

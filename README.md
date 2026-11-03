@@ -105,10 +105,12 @@ Nothing to configure. The SessionStart hook tells the agent the inbox exists, an
 protocol. The page starts on demand the first time something is posted: http://127.0.0.1:7700/. It's one inbox for all your
 projects: each card shows which project it came from, and clicking that badge shows only that project.
 
-The right half of the page shows every running session: its name, how long it has been working or idle (and when its
-prompt cache has gone cold), and what it has in the inbox. A session blocked on your answer turns yellow like its card.
-Click a session to show only its items. The hooks keep this up to date; a session's name comes from Claude Code when it's
-known, else from its first prompt.
+The left half of the page shows every running session: its name, how long it has been working or idle (and when its
+prompt cache has gone cold), and what it has in the inbox. A session that needs you turns yellow, whether it's blocked on an
+item or its last turn asked you something in the chat. A session that finished (asked nothing, nothing open) shows "done"
+for two minutes and leaves; × takes one off by hand. Either comes back when the session does something. Click a session to
+show only its items. The hooks keep this up to date; a session's name comes from Claude Code when it's known, else from its
+first prompt.
 
 Questions land there too. When an agent needs you to decide something, it posts the question with `review.py ask`, optionally with one-click options, instead of asking in a chat you might never look at. The Stop hook catches a turn that ends on a question asked in chat.
 

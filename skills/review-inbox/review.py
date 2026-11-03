@@ -994,6 +994,7 @@ def respond(ev):
 
 SESSIONS = os.path.join(DIR, ".sessions")
 GONE_MIN = 60  # an idle session with nothing in the inbox drops off the page after this long (no SessionEnd if it crashed)
+DONE_S = 120  # a session that finished (asked nothing, nothing open) shows "done" this long, then leaves the board
 
 
 def track(ev, blocked):
@@ -1018,8 +1019,13 @@ def track(ev, blocked):
             s["turn"] = time.time()
         s["busy"] = True
         s.setdefault("prompt", " ".join((ev.get("prompt") or "").split())[:80])  # the card's name when the app's isn't known
-    elif name == "SessionStart" or (name == "Stop" and not blocked):
+        s["asks"], s["done"] = "", False
+    elif name == "SessionStart":
         s["busy"] = False
+    elif name == "Stop" and not blocked:
+        # the turn really ended: it either asked the human something (waiting on you) or, with nothing open in the inbox, it's done
+        s["busy"], s["asks"] = False, asked(ev)
+        s["done"] = not s["asks"] and not any(i["status"] == "open" for i in mine(sid))
     os.makedirs(SESSIONS, exist_ok=True)
     with open(path + ".tmp", "w", encoding="utf-8") as f:
         json.dump(s, f)
@@ -1052,8 +1058,9 @@ def sessions():
             continue
         a = app.get(s.get("sid"), {})
         mine_open = [i for i in everything if i.get("sid") == s.get("sid") and i["status"] == "open"]
-        if (a.get("pid") and not pid_alive(int(a["pid"]))) or (
-                not a and not s.get("busy") and not mine_open and now - s.get("last", 0) > GONE_MIN * 60):
+        idle = now - s.get("last", 0)
+        if (a.get("pid") and not pid_alive(int(a["pid"]))) or (s.get("done") and not mine_open and idle > DONE_S) or (
+                not a and not s.get("busy") and not mine_open and not s.get("asks") and idle > GONE_MIN * 60):
             try:
                 os.remove(f)
             except OSError:
@@ -1066,26 +1073,59 @@ def sessions():
             if not busy and s.get("busy"):
                 s["last"] = (a.get("statusUpdatedAt") or now * 1000) / 1000
             s["busy"] = busy
+            if busy:
+                s["asks"], s["done"] = "", False
+        s["done"] = s.get("done") and not mine_open  # an item posted after its turn ended still needs you
         out.append({**s, "name": a.get("name") or s.get("prompt") or "", "open": len(mine_open),
                     "waiting": any(waiting(i["id"]) for i in mine_open)})
     return {"now": now, "warm_min": WARM_MIN, "sessions": out}
+
+
+def hide_session(sid):
+    """The page's x on a session card: off the board until the session does something again (its next hook brings it back)."""
+    path = os.path.join(SESSIONS, re.sub(r"[^A-Za-z0-9_-]", "", sid) + ".json")
+    if os.path.exists(path):
+        os.remove(path)
+    return {"hidden": sid}
+
+
+def asked(ev):
+    """What the turn that just ended asked the human, '' if nothing: the Code tab's next-step question (wrap_up's `ask`,
+    which the reply itself doesn't repeat), else a reply that ends on a question."""
+    for e in reversed(transcript_tail(ev)):
+        content = (e.get("message") or {}).get("content")
+        if e.get("type") == "user" and (isinstance(content, str) or any(c.get("type") == "text" for c in content or [] if isinstance(c, dict))):
+            break  # the human's prompt: the turn started here
+        if e.get("type") == "assistant" and isinstance(content, list):
+            for c in content:
+                if isinstance(c, dict) and c.get("type") == "tool_use" and c.get("name", "").endswith("wrap_up"):
+                    return " ".join(str((c.get("input") or {}).get("ask") or "").split())[:160]
+    text = last_message(ev)
+    return text.strip().split("\n\n")[-1].strip()[:160] if asks_human(text) else ""
+
+
+def transcript_tail(ev):
+    """The last ~256 KB of the session's transcript as parsed entries; [] when there isn't one (Codex, tests)."""
+    try:
+        with open(ev.get("transcript_path") or "", "rb") as f:
+            f.seek(max(0, os.path.getsize(f.name) - 262144))
+            lines = f.read().decode("utf-8", "replace").splitlines()
+    except OSError:
+        return []
+    out = []
+    for line in lines:
+        try:
+            out.append(json.loads(line))
+        except ValueError:
+            pass
+    return out
 
 
 def last_message(ev):
     """The agent's last reply: from the hook input (Codex) or the tail of the transcript (Claude Code). '' when unknown."""
     if ev.get("last_assistant_message"):
         return ev["last_assistant_message"]
-    try:
-        with open(ev.get("transcript_path") or "", "rb") as f:
-            f.seek(max(0, os.path.getsize(f.name) - 262144))
-            lines = f.read().decode("utf-8", "replace").splitlines()
-    except OSError:
-        return ""
-    for line in reversed(lines):
-        try:
-            e = json.loads(line)
-        except ValueError:
-            continue
+    for e in reversed(transcript_tail(ev)):
         if e.get("type") == "assistant":
             content = (e.get("message") or {}).get("content")
             text = content if isinstance(content, str) else "".join(c.get("text", "") for c in content or [] if isinstance(c, dict))
@@ -1190,6 +1230,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         if not self.local():
             return
+        if self.path == "/api/sessions/hide":  # the x on a session card
+            if not self.headers.get("Content-Type", "").startswith("application/json"):
+                return self.send_error(415)
+            try:
+                body = json.loads(self.rfile.read(min(int(self.headers.get("Content-Length", 0)), 4096)) or b"{}")
+                return self.send_body(json.dumps(hide_session(str(body.get("sid", "")))))
+            except (ValueError, OSError) as e:
+                return self.send_error(400, str(e))
         if self.path == "/api/stt/download":  # the human said yes to the model download
             if not self.headers.get("Content-Type", "").startswith("application/json"):
                 return self.send_error(415)
