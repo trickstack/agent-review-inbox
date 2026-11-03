@@ -36,7 +36,7 @@ command, {out} and {seconds} are filled in), REVIEW_INBOX_NO_TOAST, REVIEW_INBOX
 REVIEW_INBOX_KEEP_DAYS (7: answered items lose their media after this many days; 0 keeps everything),
 REVIEW_INBOX_WHISPER (whisper-server or its folder: turns on the page's Dictate), REVIEW_INBOX_WHISPER_MODEL (large-v3-turbo-q5_0: a model name, downloaded once, or a .bin path), REVIEW_INBOX_STT_PORT (page port + 1).
 """
-import argparse, base64, binascii, glob, http.server, json, os, re, shutil, subprocess, sys, threading, time
+import argparse, atexit, base64, binascii, glob, http.server, json, os, re, shutil, subprocess, sys, threading, time
 from datetime import datetime
 
 def shown(path):
@@ -505,6 +505,7 @@ STT_CACHE = os.path.join(os.path.expanduser("~"), ".cache", "review-inbox")
 STT_PORT = int(os.environ.get("REVIEW_INBOX_STT_PORT") or PORT + 1)
 STT_IDLE = 600
 STT = {"proc": None, "timer": None, "lock": threading.Lock(), "dl": None, "mb": None}
+atexit.register(lambda: STT["proc"] and STT["proc"].poll() is None and STT["proc"].terminate())  # the timer dies with us
 
 
 def whisper_server():
@@ -532,7 +533,7 @@ def stt_status():
             STT["mb"] = sum(int(urllib.request.urlopen(urllib.request.Request(model_url(n, r), headers={"Range": "bytes=0-0"}),
                                                        timeout=15).headers["Content-Range"].split("/")[1]) for n, r in need) // 10**6
         except (OSError, ValueError, AttributeError, IndexError):
-            pass
+            STT["mb"] = 0  # unknown: ask without a size rather than probe again on every poll
     return {"ready": not missing and not need, "missing": missing, "need": [n for n, _ in need], "mb": STT["mb"],
             "cache": shown(STT_CACHE), "dl": STT["dl"]}
 
@@ -551,11 +552,12 @@ def stt_download():
             os.makedirs(STT_CACHE, exist_ok=True)
             for name, repo in need:
                 path, base = model_path(name), STT["dl"]["done"]
-                urllib.request.urlretrieve(model_url(name, repo), path + ".part", lambda n, bs, _: STT["dl"].update(done=base + n * bs))
+                urllib.request.urlretrieve(model_url(name, repo), path + ".part", lambda n, bs, total: STT["dl"].update(done=base + min(n * bs, total if total > 0 else n * bs)))
                 os.replace(path + ".part", path)
-        except OSError as e:
+        except Exception as e:  # anything: a thread that dies busy leaves the page polling forever
             STT["dl"]["error"] = str(e)[:300]
-        STT["dl"]["busy"] = False
+        finally:
+            STT["dl"]["busy"] = False
     threading.Thread(target=run, daemon=True).start()
 
 
@@ -577,6 +579,8 @@ def stt(audio):
                          input=audio, capture_output=True, check=True).stdout
     with STT["lock"]:  # one start at a time
         if not (STT["proc"] and STT["proc"].poll() is None):
+            if port_open(STT_PORT):  # not ours: never send the human's voice to whatever else listens there
+                raise ValueError(f"port {STT_PORT} is taken by another program: stop it or set REVIEW_INBOX_STT_PORT")
             model, vad = (model_path(n) for n, _ in STT_MODELS)
             STT["proc"] = subprocess.Popen(
                 [whisper_server(), "--host", "127.0.0.1", "--port", str(STT_PORT), "--model", model,
@@ -589,6 +593,8 @@ def stt(audio):
                 if port_open(STT_PORT) or STT["proc"].poll() is not None:
                     break
                 time.sleep(0.25)
+            if STT["proc"].poll() is not None:
+                raise ValueError(f"whisper-server exited with code {STT['proc'].returncode}: run it by hand to see why")
         if STT["timer"]:
             STT["timer"].cancel()
         STT["timer"] = threading.Timer(STT_IDLE, STT["proc"].terminate)
@@ -997,12 +1003,16 @@ GONE_MIN = 60  # an idle session with nothing in the inbox drops off the page af
 DONE_S = 120  # a session that finished (asked nothing, nothing open) shows "done" this long, then leaves the board
 
 
+def session_path(sid):
+    return os.path.join(SESSIONS, (re.sub(r"[^A-Za-z0-9_-]", "", sid) or "_") + ".json")
+
+
 def track(ev, blocked):
     """Every session's hooks keep .sessions/<sid>.json: working since (turn), last activity, idle once a turn really ends."""
     sid, name = ev.get("session_id", ""), ev.get("hook_event_name")
     if not sid:
         return
-    path = os.path.join(SESSIONS, re.sub(r"[^A-Za-z0-9_-]", "", sid) + ".json")
+    path = session_path(sid)
     if name == "SessionEnd":
         if os.path.exists(path):
             os.remove(path)
@@ -1018,7 +1028,9 @@ def track(ev, blocked):
         if not s.get("busy"):
             s["turn"] = time.time()
         s["busy"] = True
-        s.setdefault("prompt", " ".join((ev.get("prompt") or "").split())[:80])  # the card's name when the app's isn't known
+        prompt = " ".join((ev.get("prompt") or "").split())[:80]
+        if prompt and not prompt.startswith("/") and not s.get("prompt"):  # the card's name when the app's isn't known
+            s["prompt"] = prompt
         s["asks"], s["done"] = "", False
     elif name == "SessionStart":
         s["busy"] = False
@@ -1083,7 +1095,7 @@ def sessions():
 
 def hide_session(sid):
     """The page's x on a session card: off the board until the session does something again (its next hook brings it back)."""
-    path = os.path.join(SESSIONS, re.sub(r"[^A-Za-z0-9_-]", "", sid) + ".json")
+    path = session_path(sid)
     if os.path.exists(path):
         os.remove(path)
     return {"hidden": sid}
@@ -1094,7 +1106,7 @@ def asked(ev):
     which the reply itself doesn't repeat), else a reply that ends on a question."""
     for e in reversed(transcript_tail(ev)):
         content = (e.get("message") or {}).get("content")
-        if e.get("type") == "user" and (isinstance(content, str) or any(c.get("type") == "text" for c in content or [] if isinstance(c, dict))):
+        if e.get("type") == "user" and not e.get("isMeta") and (isinstance(content, str) or any(c.get("type") == "text" for c in content or [] if isinstance(c, dict))):
             break  # the human's prompt: the turn started here
         if e.get("type") == "assistant" and isinstance(content, list):
             for c in content:
@@ -1105,20 +1117,30 @@ def asked(ev):
 
 
 def transcript_tail(ev):
-    """The last ~256 KB of the session's transcript as parsed entries; [] when there isn't one (Codex, tests)."""
-    try:
-        with open(ev.get("transcript_path") or "", "rb") as f:
-            f.seek(max(0, os.path.getsize(f.name) - 262144))
-            lines = f.read().decode("utf-8", "replace").splitlines()
-    except OSError:
-        return []
-    out = []
-    for line in lines:
-        try:
-            out.append(json.loads(line))
-        except ValueError:
-            pass
-    return out
+    """The last ~256 KB of the session's transcript as parsed entries; [] when there isn't one (Codex, tests). Read once per hook.
+    At Stop the final reply may not be written yet: a turn ends on assistant text, so wait up to a second for it."""
+    if "_tail" not in ev:
+        for _ in range(6):
+            try:
+                with open(ev.get("transcript_path") or "", "rb") as f:
+                    f.seek(max(0, os.path.getsize(f.name) - 262144))
+                    lines = f.read().decode("utf-8", "replace").splitlines()
+            except OSError:
+                lines = []
+            out = []
+            for line in lines:
+                try:
+                    out.append(json.loads(line))
+                except ValueError:
+                    pass
+            last = out[-1] if out else {}
+            content = (last.get("message") or {}).get("content")
+            if not out or ev.get("hook_event_name") != "Stop" or (last.get("type") == "assistant" and not any(
+                    isinstance(c, dict) and c.get("type") == "tool_use" for c in content or [] if not isinstance(content, str))):
+                break
+            time.sleep(0.2)
+        ev["_tail"] = out
+    return ev["_tail"]
 
 
 def last_message(ev):

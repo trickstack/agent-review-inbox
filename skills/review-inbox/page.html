@@ -346,7 +346,7 @@ async function sttReady(id) {
 `)), false;
   if (s.ready) return true;
   if (!s.dl?.busy) {
-    if (!confirm(`Dictation runs on your machine and needs its speech model (${s.need.join(" + ")}, ${s.mb ?? "?"} MB from huggingface.co, ` +
+    if (!confirm(`Dictation runs on your machine and needs its speech model (${s.need.join(" + ")}, ${s.mb || "?"} MB from huggingface.co, ` +
                  `saved in ${s.cache}). Download it now?`)) return false;
     await fetch("/api/stt/download", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
   }
@@ -356,7 +356,7 @@ async function sttReady(id) {
     s = await get();
     if (s.ready) return show("Dictate", false), false;
     if (!s.dl?.busy) return show("Dictate", false), alert("Model download failed: " + (s.dl?.error || "stopped")), false;
-    show(`Downloading ${Math.floor(s.dl.done / 1e6)} / ${s.mb ?? "?"} MB`, true);
+    show(`Downloading ${Math.floor(s.dl.done / 1e6)} / ${s.mb || "?"} MB`, true);
   }
 }
 

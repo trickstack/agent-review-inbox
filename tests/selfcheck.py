@@ -311,7 +311,7 @@ def turn(sid, *assistant):
     with open(t, "w", encoding="utf-8") as f:
         f.write(json.dumps({"type": "user", "message": {"content": "go"}}) + "\n")
         for content in assistant:
-            f.write(json.dumps({"type": "assistant", "message": {"content": content}}) + "\n")
+            f.write(json.dumps(content if isinstance(content, dict) else {"type": "assistant", "message": {"content": content}}) + "\n")
     ev = {"session_id": sid, "transcript_path": t, "cwd": tmp}
     review.track({**ev, "hook_event_name": "UserPromptSubmit", "prompt": "go"}, False)
     review.track({**ev, "hook_event_name": "Stop"}, False)
@@ -324,6 +324,10 @@ box = turn("b-box", [{"type": "tool_use", "name": "mcp__ccd_turn__wrap_up", "inp
 assert box["asks"] == "Commit and push?" and not box["done"], box
 chat = turn("b-chat", [{"type": "text", "text": "Fixed it.\n\nShould I also update the README?"}])
 assert chat["asks"].endswith("README?") and not chat["done"], chat
+meta = turn("b-meta", [{"type": "tool_use", "name": "mcp__ccd_turn__wrap_up", "input": {"recap": "Ready.", "ask": "Merge it?"}}],
+            {"type": "user", "isMeta": True, "message": {"content": [{"type": "text", "text": "Stop hook feedback: run wait"}]}},
+            [{"type": "text", "text": "Done waiting."}])
+assert meta["asks"] == "Merge it?", meta  # a hook's message in the transcript isn't the human's prompt
 p = os.path.join(review.SESSIONS, "b-done.json")
 s = json.load(open(p))
 s["last"] -= review.DONE_S + 1
