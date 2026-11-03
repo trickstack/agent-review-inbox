@@ -136,6 +136,7 @@ def prompt(sid, text):
 
 
 subprocess.run([sys.executable, CLI, "--session", "q3", "ask", "Asked before any prompt?"], env=env, capture_output=True)
+time.sleep(1.1)  # ids have whole seconds: in the same second as the prompt it would count as asked after it
 prompt("q3", "hi")  # the session's first prompt seen: closes nothing, so that question stays up for the inbox
 time.sleep(1.1)
 subprocess.run([sys.executable, CLI, "--session", "q3", "ask", "Bigger ball?"], env=env, capture_output=True)
@@ -303,5 +304,37 @@ assert "still.png" in os.listdir(new_d) and "still.png" in os.listdir(open_d)
 review.KEEP_DAYS = 0
 review.prune(force=True)
 assert "still.png" in os.listdir(new_d)
+
+# session board: a turn that asked nothing and left nothing open is done (and leaves after DONE_S); a question keeps it up
+def turn(sid, *assistant):
+    t = os.path.join(tmp, sid + ".jsonl")
+    with open(t, "w", encoding="utf-8") as f:
+        f.write(json.dumps({"type": "user", "message": {"content": "go"}}) + "\n")
+        for content in assistant:
+            f.write(json.dumps(content if isinstance(content, dict) else {"type": "assistant", "message": {"content": content}}) + "\n")
+    ev = {"session_id": sid, "transcript_path": t, "cwd": tmp}
+    review.track({**ev, "hook_event_name": "UserPromptSubmit", "prompt": "go"}, False)
+    review.track({**ev, "hook_event_name": "Stop"}, False)
+    return {s["sid"]: s for s in review.sessions()["sessions"]}.get(sid)
+fin = turn("b-done", [{"type": "text", "text": "Committed 1a2b3c, tests pass."},
+                      {"type": "tool_use", "name": "mcp__ccd_turn__wrap_up", "input": {"recap": "Shipped."}}])
+assert fin["done"] and not fin["asks"], fin
+box = turn("b-box", [{"type": "tool_use", "name": "mcp__ccd_turn__wrap_up", "input": {"recap": "Ready.", "ask": "Commit and push?"}}],
+           [{"type": "text", "text": "Ready to ship."}])
+assert box["asks"] == "Commit and push?" and not box["done"], box
+chat = turn("b-chat", [{"type": "text", "text": "Fixed it.\n\nShould I also update the README?"}])
+assert chat["asks"].endswith("README?") and not chat["done"], chat
+meta = turn("b-meta", [{"type": "tool_use", "name": "mcp__ccd_turn__wrap_up", "input": {"recap": "Ready.", "ask": "Merge it?"}}],
+            {"type": "user", "isMeta": True, "message": {"content": [{"type": "text", "text": "Stop hook feedback: run wait"}]}},
+            [{"type": "text", "text": "Done waiting."}])
+assert meta["asks"] == "Merge it?", meta  # a hook's message in the transcript isn't the human's prompt
+p = os.path.join(review.SESSIONS, "b-done.json")
+s = json.load(open(p))
+s["last"] -= review.DONE_S + 1
+json.dump(s, open(p, "w"))
+ids = [s["sid"] for s in review.sessions()["sessions"]]
+assert "b-done" not in ids and "b-box" in ids, ids
+review.hide_session("b-box")
+assert "b-box" not in [s["sid"] for s in review.sessions()["sessions"]]
 
 print("selfcheck ok")

@@ -15,7 +15,7 @@ codex plugin marketplace add ./agent-review-inbox
 ```
 
 Start `codex`, open `/plugins`, install **agent-review-inbox**, then quit and start a new session. Open `/hooks` and
-trust the plugin's three hooks (SessionStart, UserPromptSubmit, Stop). Codex skips plugin hooks until you do.
+trust the plugin's four hooks (SessionStart, UserPromptSubmit, Stop, SessionEnd). Codex skips plugin hooks until you do.
 
 - Expected: the plugin is listed and installs. If `marketplace add` or the install fails, copy the exact error.
 
