@@ -143,7 +143,11 @@
   .scard .sp, .scard .si { font:clamp(11px, 9cqh, 12px)/1.35 var(--mono); color:var(--dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .scard .ss { font:clamp(11px, 10cqh, 13px)/1.35 var(--mono); font-variant-numeric:tabular-nums; color:var(--text2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:auto; }
   .scard:not(.busy) .ss { color:var(--dim); }
-  .scard.sub { border-style:dashed; }  /* a subagent: dashed, under its session */
+  /* a subagent hangs under its session: indented, pulled up close, a rail down its left edge, and "subagent" in its label */
+  .scard.sub { margin-left:16px; margin-top:-5px; background:transparent; }
+  .scard.sub::after { content:""; position:absolute; left:0; top:0; bottom:0; width:2px; background:var(--line2); }
+  .scard.sub.busy::after { background:var(--ok); }
+  .scard .sp .tagsub { text-transform:uppercase; letter-spacing:.06em; font-size:10px; margin-right:6px; padding:1px 5px; border:1px solid var(--line2); border-radius:4px; }
   .scard.done { opacity:.6; } .scard.done:hover { opacity:1; }
   .sx { position:absolute; top:4px; right:4px; width:24px; height:24px; padding:0; border:0; border-radius:6px; cursor:pointer;
     background:transparent; color:var(--dim); font:16px/24px var(--sans); opacity:0; transition:opacity .15s var(--ease), background-color .15s var(--ease); }
@@ -169,6 +173,7 @@
     /* one row that scrolls sideways, so the inbox stays on the first screen however many sessions there are */
     #sgrid { display:flex; overflow-x:auto; scroll-snap-type:x proximity; padding-bottom:4px; }
     .scard { flex:0 0 200px; scroll-snap-align:start; container-type:normal; padding:12px; gap:4px; }  /* sized by their text here */
+    .scard.sub { margin:0 0 0 -4px; flex-basis:180px; }  /* in the sideways row: no indent, the rail and the label say it */
     .scard .sn { font-size:13px; } .scard .sp, .scard .si { font-size:12px; } .scard .ss { font-size:12px; margin-top:4px; }
     #inbox { padding:0 16px 48px; }
     .card { padding:16px; }
@@ -476,7 +481,7 @@ function drawSessions() {
         const t = document.createElement("template");
         t.innerHTML = `<div class="scard sub${s.busy ? " busy" : ""}${s.done ? " done" : ""}${s.sid === sess ? " sel" : ""}" data-sid="${esc(s.sid)}" data-key="${esc(s.key)}"
           role="button" tabindex="0" title="${esc("Subagent of " + s.parent + (s.model ? " (" + s.model + ")" : ""))}"><div class="sn">${esc(s.name)}</div>
-          <div class="sp">subagent of ${esc(s.parent)}</div><div class="ss"><span class="dot"></span><span class="st"></span></div>
+          <div class="sp"><span class="tagsub">subagent</span>${esc(s.parent)}</div><div class="ss"><span class="dot"></span><span class="st"></span></div>
           ${inbox ? `<div class="si">${esc(inbox)}</div>` : ""}</div>`;
         const n = t.content.firstChild;
         n._key = key;
@@ -489,14 +494,16 @@ function drawSessions() {
     const idle = now - s.last, cold = !s.busy && idle >= S.warm_min * 60;
     const inbox = s.waiting ? "waiting on you" : s.asks ? "asks: " + s.asks : s.open ? `${s.open} open in the inbox` : "";
     const fin = s.done && !needs(s), name = s.name || s.project || s.sid.slice(0, 8);
-    const key = JSON.stringify([name, projects, s.busy, needs(s), fin, inbox, s.sid === sess, cold]);
+    const kids = s.subagents || [], run = kids.filter(a => a.busy).length;
+    const subLine = kids.length ? `${kids.length} subagent${kids.length > 1 ? "s" : ""}, ${run} running` : "";
+    const key = JSON.stringify([name, projects, s.busy, needs(s), fin, inbox, subLine, s.sid === sess, cold]);
     let c = old.get(s.sid);
     if (!c || c._key !== key) {
       const t = document.createElement("template");
       t.innerHTML = `<div class="scard${s.busy ? " busy" : ""}${needs(s) ? " waiting" : ""}${fin ? " done" : ""}${s.sid === sess ? " sel" : ""}" data-sid="${esc(s.sid)}" data-key="${esc(s.sid)}"
         role="button" tabindex="0" title="${esc(s.asks || s.project_dir || "")}"><div class="sn">${esc(name)}</div>
         ${projects && s.name ? `<div class="sp">${esc(s.project)}</div>` : ""}<div class="ss"><span class="dot"></span><span class="st"></span></div>
-        ${inbox ? `<div class="si">${esc(inbox)}</div>` : ""}${s.busy || fin ? "" : `<div class="sb${cold ? " cold" : ""}"><i></i></div>`}
+        ${inbox ? `<div class="si">${esc(inbox)}</div>` : ""}${subLine ? `<div class="si">${esc(subLine)}</div>` : ""}${s.busy || fin ? "" : `<div class="sb${cold ? " cold" : ""}"><i></i></div>`}
         <button class="sx" data-hide="${esc(s.sid)}" title="Remove from the board (it comes back when the session does something)" aria-label="Remove ${esc(name)} from the board">×</button></div>`;
       const n = t.content.firstChild;
       n._key = key;

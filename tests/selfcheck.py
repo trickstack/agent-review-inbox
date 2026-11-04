@@ -385,6 +385,9 @@ old = time.time() - review.SUB_LIVE_S - 5
 os.utime(os.path.join(sub, "agent-3.jsonl"), (old, old))
 got = {a["name"]: a for a in review.subagents("b-sub", [], time.time())}
 assert set(got) == {"Fix hull", "Fix fauna"} and got["Fix hull"]["busy"] and got["Fix fauna"]["done"], got
+open(os.path.join(sub, "agent-1.jsonl"), "w").write('{"type":"user"}\n{"type":"user","content":"Report delivered to your caller."}\n')  # handed back, meta not yet flagged
+assert next(a for a in review.subagents("b-sub", [], time.time()) if a["name"] == "Fix hull")["done"]
+open(os.path.join(sub, "agent-1.jsonl"), "w").close()
 assert review.subagents("nobody", [], time.time()) == []
 # an idle, long-quiet parent stays on the board while a subagent of it runs
 json.dump({"sid": "b-sub", "started": time.time() - 9999, "last": time.time() - review.GONE_MIN * 60 - 5, "project": "p", "project_dir": "p"}, open(os.path.join(review.SESSIONS, "b-sub.json"), "w"))
