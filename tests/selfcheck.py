@@ -194,6 +194,12 @@ with open(tr, "w") as f:
     f.write(json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": "Should I also add particles?"}]}}) + "\n")
 assert "ask" in stop_after("", transcript=tr)
 assert stop_after("", transcript=os.path.join(tmp, "missing.jsonl")) == ""  # fails open
+with open(tr, "w") as f:  # a go-ahead asked only in the app's closing box (wrap_up's ask), not in the reply text
+    f.write(json.dumps({"type": "user", "message": {"content": "go"}}) + "\n")
+    f.write(json.dumps({"type": "assistant", "message": {"content": [{"type": "tool_use", "name": "mcp__ccd_turn__wrap_up",
+                                                                       "input": {"recap": "Frames done.", "ask": "Build the photo wall now?"}}]}}) + "\n")
+    f.write(json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": "Both frames are in."}]}}) + "\n")
+assert "closing next-step box" in stop_after("", transcript=tr)
 
 # scripted steps: ';' splits --do, a --script splits on lines only (so a typed ';' survives), bad steps fail fast
 assert review.parse_steps("click text=Save; type hi there ;key Control+S; wait 300") == [

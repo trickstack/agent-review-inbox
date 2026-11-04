@@ -77,7 +77,9 @@ what it disables and how to install it; offer the human the install.
 ## Asking the human
 
 The human steers through the inbox and may never see a question you ask in chat; your session then sits idle until its
-cache goes cold. So put every question for them in the inbox:
+cache goes cold. So put every question for them in the inbox, not just ones about how something looks: a go-ahead, a
+choice of approach, "build X now or wait for Y?". An app's closing next-step box (a wrap_up `ask` with buttons) counts as
+chat too: once you have used the inbox, keep that box to a recap and ask here:
 
 `review.py ask "Should the trail match the ball colour or stay cyan?" --options "Match the ball" "Stay cyan"`
 

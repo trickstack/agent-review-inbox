@@ -1015,12 +1015,14 @@ def respond(ev):
             print(json.dumps({"decision": "block", "reason": f"Open review item(s) {', '.join(idle)} with nothing waiting for the answer: "
                               f"run `{cli(sid)} wait` as a background command (run_in_background), then end your turn."}))
             return True
-        # the human steers through the inbox and misses questions asked in chat: catch a turn that ends on one, once.
-        # Only in a session that has used the inbox; anywhere else a question in chat is just a question.
+        # the human steers through the inbox and misses questions asked in chat, or in the app's closing next-step box
+        # (wrap_up's `ask`): catch a turn that ends on one, once. Only in a session that has used the inbox; anywhere else
+        # a question in chat is just a question.
         own = mine(sid)
-        if own and not any(not i.get("answered") for i in own) and asks_human(last_message(ev)):
-            print(json.dumps({"decision": "block", "reason": f"If that's a question for the human, post it with `{cli(sid)} ask \"<question>\" "
-                              "[--options A B ...]` and run `wait` as a background command; otherwise just end your turn."}))
+        if own and not any(not i.get("answered") for i in own) and asked(ev):
+            print(json.dumps({"decision": "block", "reason": f"If that's a question for the human (in your reply or the closing next-step box), "
+                              f"post it with `{cli(sid)} ask \"<question>\" [--options A B ...]` and run `wait` as a background command; "
+                              "otherwise just end your turn."}))
             return True
 
 
