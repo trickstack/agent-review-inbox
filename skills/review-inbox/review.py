@@ -32,11 +32,11 @@ on a page in viewport pixels, on the desktop relative to the --window's top-left
 the screen. Desktop steps need pyautogui and REVIEW_INBOX_DESKTOP=1; the cursor glides to each target so the viewer sees what was clicked.
 
 REVIEW_INBOX_WARM_MIN (50: `wait` gives up this many idle minutes minus 5, sized for a one-hour prompt cache), REVIEW_INBOX_CLIP_CMD (custom capture
-command, {out} and {seconds} are filled in), REVIEW_INBOX_NO_TOAST, REVIEW_INBOX_NO_SERVER, REVIEW_INBOX_DESKTOP (1: allow screen/window capture and desktop steps),
+command, {out} and {seconds} are filled in), REVIEW_INBOX_NO_TOAST, REVIEW_INBOX_NO_SERVER, REVIEW_INBOX_BOARD_ONLY (1: hooks only feed the session board),REVIEW_INBOX_DESKTOP (1: allow screen/window capture and desktop steps),
 REVIEW_INBOX_KEEP_DAYS (7: answered items lose their media after this many days; 0 keeps everything),
 REVIEW_INBOX_WHISPER (whisper-server or its folder: turns on the page's Dictate), REVIEW_INBOX_WHISPER_MODEL (large-v3-turbo-q5_0: a model name, downloaded once, or a .bin path), REVIEW_INBOX_STT_PORT (page port + 1).
 """
-import argparse, atexit, base64, binascii, glob, http.server, json, os, re, shutil, subprocess, sys, threading, time
+import atexit, base64, binascii, glob, json, os, re, shutil, subprocess, sys, threading, time
 from datetime import datetime
 
 def shown(path):
@@ -63,6 +63,7 @@ STATUSES = ("open", "ok", "redo", "dismissed", "answered")
 ANSWERS = {"review": ("ok", "redo", "dismissed"), "question": ("answered", "dismissed")}  # what the human can set, per kind
 MAX_BODY = 32 << 20  # a POST from the page: a note plus a few pasted screenshots
 DESKTOP = os.environ.get("REVIEW_INBOX_DESKTOP") == "1"  # screen/window capture and desktop steps: opt-in, they take over the screen
+BOARD_ONLY = os.environ.get("REVIEW_INBOX_BOARD_ONLY") == "1"  # hooks only keep the session's card: no inbox pitch, no held turns
 KEEP_DAYS = float(os.environ.get("REVIEW_INBOX_KEEP_DAYS") or 7)  # answered items lose their media after this; 0 keeps everything
 LOCK_WAIT_S = 360  # a second recording waits this long for the first (the longest clip with steps is 300 s)
 NO_DESKTOP = ("Screen and window capture is off: it films your real screen, and steps drive your real mouse and keyboard. "
@@ -933,12 +934,20 @@ def hook():
         pass
 
 
+def safe_hook():
+    try:  # a failing hook must never block the human's prompt
+        hook()
+    except BaseException as e:
+        sys.stderr.write(f"review hook skipped: {e!r}\n")
+    sys.exit(0)
+
+
 def respond(ev):
     """Claude Code hook. SessionStart: tells the agent the inbox exists. UserPromptSubmit: verdicts arrive with the prompt.
     Stop: the turn can't end before the agent has read a verdict, acted on it, and armed `wait` for its open items.
     True when it blocked the turn."""
     sid, name = ev.get("session_id", ""), ev.get("hook_event_name")
-    if name == "SessionEnd":
+    if name == "SessionEnd" or BOARD_ONLY:
         return
     if name == "SessionStart":
         print(f"You have a review inbox ({PAGE}). When you finish something a human has to judge by eye, ear or feel "
@@ -1072,7 +1081,8 @@ def sessions():
         mine_open = [i for i in everything if i.get("sid") == s.get("sid") and i["status"] == "open"]
         idle = now - s.get("last", 0)
         if (a.get("pid") and not pid_alive(int(a["pid"]))) or (s.get("done") and not mine_open and idle > DONE_S) or (
-                not a and not s.get("busy") and not mine_open and not s.get("asks") and idle > GONE_MIN * 60):
+                not a and not s.get("busy") and not mine_open and not s.get("asks") and idle > GONE_MIN * 60) or (
+                s.get("asks") and not s.get("busy") and not mine_open and idle > WARM_MIN * 60):  # a question left unanswered past the cache is stale
             try:
                 os.remove(f)
             except OSError:
@@ -1161,137 +1171,140 @@ def asks_human(text):
     tail = text.strip().split("\n\n")[-1].strip()
     if tail.rstrip(" *_`)\"'").endswith("?"):
         return True
-    return "?" in tail and re.search(r"(?i)\b(option|which|would you like|do you want|should i|shall i|prefer|or)\b", tail) is not None
+    tail = re.sub(r"`[^`]*`|\S+://\S+", "", tail)  # a ? in code or a URL isn't a question
+    return re.search(r"\?(\s|$)", tail) is not None and re.search(
+        r"(?i)\b(which|would you like|do you want|want me to|should i|shall i|prefer)\b", tail) is not None
 
 
 # ---------------------------------------------------------------- the page
 
-class Handler(http.server.BaseHTTPRequestHandler):
-    def log_message(self, *a):
-        pass
+def serve():
+    import http.server  # here, not at the top: every hook call loads this file and this import is most of its startup
 
-    def local(self):
-        """Only this page may talk to the server: a Host other than ours is DNS rebinding, a foreign Origin is another site."""
-        host, origin = self.headers.get("Host", ""), self.headers.get("Origin")
-        loopback = HOST in ("127.0.0.1", "localhost", "::1")  # bound wider (REVIEW_INBOX_HOST), any address of ours is fine
-        ours = host in (f"127.0.0.1:{PORT}", f"localhost:{PORT}") or (HOSTNAME and host.split(":")[0] == HOSTNAME)
-        if (loopback and not ours) or (origin and origin not in (f"http://{host}", f"https://{host}")):
-            self.send_error(403)
-            return False
-        return True
-
-    def send_body(self, body, ctype="application/json", code=200):
-        b = body.encode() if isinstance(body, str) else body
-        self.send_response(code)
-        self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(len(b)))
-        self.send_header("Cache-Control", "no-cache")
-        self.end_headers()
-        self.wfile.write(b)
-
-    def send_file(self, path):
-        """With `Range` support: without it every <video> pulls its whole clip just for metadata and can't seek."""
-        import mimetypes
-        size = os.path.getsize(path)
-        ctype = mimetypes.guess_type(path)[0] or "application/octet-stream"
-        m = re.fullmatch(r"bytes=(\d*)-(\d*)", self.headers.get("Range", ""))
-        start, end = 0, size - 1
-        if m and m.groups() != ("", ""):
-            a, b = m.groups()
-            start, end = (int(a), min(int(b or size - 1), size - 1)) if a else (max(size - int(b), 0), size - 1)
-            if start > end:
-                self.send_response(416)
-                self.send_header("Content-Range", f"bytes */{size}")
-                self.send_header("Content-Length", "0")
-                return self.end_headers()
-            self.send_response(206)
-            self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
-        else:
-            self.send_response(200)
-        self.send_header("Content-Type", ctype)
-        self.send_header("X-Content-Type-Options", "nosniff")
-        if not ctype.startswith(("image/", "video/", "audio/")) or ctype == "image/svg+xml":  # an attached .html/.svg can't run here
-            self.send_header("Content-Disposition", "attachment")
-        self.send_header("Content-Length", str(end - start + 1))
-        self.send_header("Accept-Ranges", "bytes")
-        self.end_headers()
-        try:
-            with open(path, "rb") as f:
-                f.seek(start)
-                left = end - start + 1
-                while left > 0 and (chunk := f.read(min(left, 1 << 16))):
-                    self.wfile.write(chunk)
-                    left -= len(chunk)
-        except ConnectionError:  # browsers drop media requests all the time (seek, scroll away)
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *a):
             pass
 
-    def do_GET(self):
-        if not self.local():
-            return
-        path = self.path.split("?")[0]
-        if path == "/":
-            with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "page.html"), "rb") as f:
-                return self.send_body(f.read(), "text/html; charset=utf-8")
-        if path == "/api/review":
-            return self.send_body(json.dumps([{**i, "waiting": waiting(i["id"])} for i in items()]))
-        if path == "/api/dir":
-            return self.send_body(DIR, "text/plain; charset=utf-8")
-        if path == "/api/sessions":
-            return self.send_body(json.dumps(sessions()))
-        if path == "/api/stt":  # what Dictate still needs, and model download progress
-            return self.send_body(json.dumps(stt_status()))
-        m = re.fullmatch(r"/media/([^/]+)/([^/]+)", path)
-        if m:
-            from urllib.parse import unquote
-            item_id, name = unquote(m[1]), unquote(m[2])
-            item = next((i for i in items() if i["id"] == item_id), None)  # only an item's own files, never a path
-            if item and name in item["media"] + item.get("reply", []) and os.path.isfile(os.path.join(DIR, item_id, name)):
-                return self.send_file(os.path.join(DIR, item_id, name))
-        self.send_error(404)
+        def local(self):
+            """Only this page may talk to the server: a Host other than ours is DNS rebinding, a foreign Origin is another site."""
+            host, origin = self.headers.get("Host", ""), self.headers.get("Origin")
+            loopback = HOST in ("127.0.0.1", "localhost", "::1")  # bound wider (REVIEW_INBOX_HOST), any address of ours is fine
+            ours = host in (f"127.0.0.1:{PORT}", f"localhost:{PORT}") or (HOSTNAME and host.split(":")[0] == HOSTNAME)
+            if (loopback and not ours) or (origin and origin not in (f"http://{host}", f"https://{host}")):
+                self.send_error(403)
+                return False
+            return True
 
-    def do_POST(self):
-        if not self.local():
-            return
-        if self.path == "/api/sessions/hide":  # the x on a session card
-            if not self.headers.get("Content-Type", "").startswith("application/json"):
-                return self.send_error(415)
+        def send_body(self, body, ctype="application/json", code=200):
+            b = body.encode() if isinstance(body, str) else body
+            self.send_response(code)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(b)))
+            self.send_header("Cache-Control", "no-cache")
+            self.end_headers()
+            self.wfile.write(b)
+
+        def send_file(self, path):
+            """With `Range` support: without it every <video> pulls its whole clip just for metadata and can't seek."""
+            import mimetypes
+            size = os.path.getsize(path)
+            ctype = mimetypes.guess_type(path)[0] or "application/octet-stream"
+            m = re.fullmatch(r"bytes=(\d*)-(\d*)", self.headers.get("Range", ""))
+            start, end = 0, size - 1
+            if m and m.groups() != ("", ""):
+                a, b = m.groups()
+                start, end = (int(a), min(int(b or size - 1), size - 1)) if a else (max(size - int(b), 0), size - 1)
+                if start > end:
+                    self.send_response(416)
+                    self.send_header("Content-Range", f"bytes */{size}")
+                    self.send_header("Content-Length", "0")
+                    return self.end_headers()
+                self.send_response(206)
+                self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+            else:
+                self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("X-Content-Type-Options", "nosniff")
+            if not ctype.startswith(("image/", "video/", "audio/")) or ctype == "image/svg+xml":  # an attached .html/.svg can't run here
+                self.send_header("Content-Disposition", "attachment")
+            self.send_header("Content-Length", str(end - start + 1))
+            self.send_header("Accept-Ranges", "bytes")
+            self.end_headers()
             try:
-                body = json.loads(self.rfile.read(min(int(self.headers.get("Content-Length", 0)), 4096)) or b"{}")
-                return self.send_body(json.dumps(hide_session(str(body.get("sid", "")))))
-            except (ValueError, OSError) as e:
-                return self.send_error(400, str(e))
-        if self.path == "/api/stt/download":  # the human said yes to the model download
-            if not self.headers.get("Content-Type", "").startswith("application/json"):
-                return self.send_error(415)
-            stt_download()
-            return self.send_body("{}")
-        if self.path == "/api/stt":  # raw recording -> {"text"}; audio/* can't come from another site's form either
-            if not self.headers.get("Content-Type", "").startswith("audio/"):
+                with open(path, "rb") as f:
+                    f.seek(start)
+                    left = end - start + 1
+                    while left > 0 and (chunk := f.read(min(left, 1 << 16))):
+                        self.wfile.write(chunk)
+                        left -= len(chunk)
+            except ConnectionError:  # browsers drop media requests all the time (seek, scroll away)
+                pass
+
+        def do_GET(self):
+            if not self.local():
+                return
+            path = self.path.split("?")[0]
+            if path == "/":
+                with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "page.html"), "rb") as f:
+                    return self.send_body(f.read(), "text/html; charset=utf-8")
+            if path == "/api/review":
+                return self.send_body(json.dumps([{**i, "waiting": waiting(i["id"])} for i in items()]))
+            if path == "/api/dir":
+                return self.send_body(DIR, "text/plain; charset=utf-8")
+            if path == "/api/sessions":
+                return self.send_body(json.dumps(sessions()))
+            if path == "/api/stt":  # what Dictate still needs, and model download progress
+                return self.send_body(json.dumps(stt_status()))
+            m = re.fullmatch(r"/media/([^/]+)/([^/]+)", path)
+            if m:
+                from urllib.parse import unquote
+                item_id, name = unquote(m[1]), unquote(m[2])
+                item = next((i for i in items() if i["id"] == item_id), None)  # only an item's own files, never a path
+                if item and name in item["media"] + item.get("reply", []) and os.path.isfile(os.path.join(DIR, item_id, name)):
+                    return self.send_file(os.path.join(DIR, item_id, name))
+            self.send_error(404)
+
+        def do_POST(self):
+            if not self.local():
+                return
+            if self.path == "/api/sessions/hide":  # the x on a session card
+                if not self.headers.get("Content-Type", "").startswith("application/json"):
+                    return self.send_error(415)
+                try:
+                    body = json.loads(self.rfile.read(min(int(self.headers.get("Content-Length", 0)), 4096)) or b"{}")
+                    return self.send_body(json.dumps(hide_session(str(body.get("sid", "")))))
+                except (ValueError, OSError) as e:
+                    return self.send_error(400, str(e))
+            if self.path == "/api/stt/download":  # the human said yes to the model download
+                if not self.headers.get("Content-Type", "").startswith("application/json"):
+                    return self.send_error(415)
+                stt_download()
+                return self.send_body("{}")
+            if self.path == "/api/stt":  # raw recording -> {"text"}; audio/* can't come from another site's form either
+                if not self.headers.get("Content-Type", "").startswith("audio/"):
+                    return self.send_error(415)
+                try:
+                    size = int(self.headers.get("Content-Length", 0))
+                    if size > MAX_BODY:
+                        return self.send_error(413)
+                    return self.send_body(json.dumps({"text": stt(self.rfile.read(size))}))
+                except (OSError, ValueError, subprocess.CalledProcessError) as e:
+                    return self.send_body(json.dumps({"error": str(e)[:400]}), "application/json", 500)
+            if self.path != "/api/review":
+                return self.send_error(404)
+            if not self.headers.get("Content-Type", "").startswith("application/json"):  # a form post from another site can't set it
                 return self.send_error(415)
             try:
                 size = int(self.headers.get("Content-Length", 0))
                 if size > MAX_BODY:
                     return self.send_error(413)
-                return self.send_body(json.dumps({"text": stt(self.rfile.read(size))}))
-            except (OSError, ValueError, subprocess.CalledProcessError) as e:
-                return self.send_body(json.dumps({"error": str(e)[:400]}), "application/json", 500)
-        if self.path != "/api/review":
-            return self.send_error(404)
-        if not self.headers.get("Content-Type", "").startswith("application/json"):  # a form post from another site can't set it
-            return self.send_error(415)
-        try:
-            size = int(self.headers.get("Content-Length", 0))
-            if size > MAX_BODY:
-                return self.send_error(413)
-            body = json.loads(self.rfile.read(size) or b"{}")
-            if body.get("remove"):
-                return self.send_body(json.dumps(remove_reply(body.get("id", ""), body["remove"])))
-            return self.send_body(json.dumps(answer(body.get("id", ""), body.get("status", ""), body.get("note", ""), body.get("images", []))))
-        except (ValueError, OSError, StopIteration, binascii.Error) as e:
-            return self.send_error(400, str(e))
+                body = json.loads(self.rfile.read(size) or b"{}")
+                if body.get("remove"):
+                    return self.send_body(json.dumps(remove_reply(body.get("id", ""), body["remove"])))
+                return self.send_body(json.dumps(answer(body.get("id", ""), body.get("status", ""), body.get("note", ""), body.get("images", []))))
+            except (ValueError, OSError, StopIteration, binascii.Error) as e:
+                return self.send_error(400, str(e))
 
-
-def serve():
     os.makedirs(DIR, exist_ok=True)
     prune()
     print(f"Review inbox for {DIR} on http://{HOST}:{PORT}/")
@@ -1300,6 +1313,9 @@ def serve():
 
 if __name__ == "__main__":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # the human's note is the payload: never the console code page
+    if sys.argv[1:] == ["hook"]:  # every prompt and stop of every session lands here: skip argparse's import
+        safe_hook()
+    import argparse
     ap = argparse.ArgumentParser()
     ap.add_argument("--session", help="the agent session posting/waiting (default: REVIEW_INBOX_SESSION or CLAUDE_CODE_SESSION_ID)")
     ap.add_argument("--dir", help="the inbox folder (default: REVIEW_INBOX_DIR, else <project>/.review-inbox)")
@@ -1411,11 +1427,7 @@ if __name__ == "__main__":
     elif args.cmd == "wait":
         sys.exit(wait(args.id))
     elif args.cmd == "hook":
-        try:  # a failing hook must never block the human's prompt
-            hook()
-        except BaseException as e:
-            sys.stderr.write(f"review hook skipped: {e!r}\n")
-        sys.exit(0)
+        safe_hook()
     elif args.cmd == "serve":
         serve()
     elif args.cmd == "revoke":

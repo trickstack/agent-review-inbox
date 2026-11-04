@@ -170,6 +170,11 @@ subprocess.run([sys.executable, CLI, "hook"], env=env, capture_output=True, text
 assert "review.py" in stop_after("Done with the trail. Want it brighter, or keep it as is?") and "ask" in stop_after("Which colour?")
 assert stop_after("Which colour?", active=True) == ""
 assert stop_after("Done: the trail is shorter now.") == ""
+assert not review.asks_human("Fixed the `?q=` parser or the redirect, see https://x.test/a?b=1 for details.")
+assert not review.asks_human("Tried red or blue? Neither worked, so it stays grey.")  # "or" alone isn't asking
+assert review.asks_human("Should I also add particles? Say the word and I'll start.")
+assert subprocess.run([sys.executable, CLI, "hook"], env={**env, "REVIEW_INBOX_BOARD_ONLY": "1"}, capture_output=True, text=True,
+                      input=json.dumps({"session_id": "q2", "hook_event_name": "Stop", "last_assistant_message": "Which colour?"})).stdout == ""
 tr = os.path.join(tmp, "t.jsonl")
 with open(tr, "w") as f:
     f.write(json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": "Should I also add particles?"}]}}) + "\n")
@@ -336,5 +341,10 @@ ids = [s["sid"] for s in review.sessions()["sessions"]]
 assert "b-done" not in ids and "b-box" in ids, ids
 review.hide_session("b-box")
 assert "b-box" not in [s["sid"] for s in review.sessions()["sessions"]]
+p = os.path.join(review.SESSIONS, "b-chat.json")  # a question nobody answered before the cache went cold leaves the board
+s = json.load(open(p))
+s["last"] -= review.WARM_MIN * 60 + 1
+json.dump(s, open(p, "w"))
+assert "b-chat" not in [s["sid"] for s in review.sessions()["sessions"]]
 
 print("selfcheck ok")

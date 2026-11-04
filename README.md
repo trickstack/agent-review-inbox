@@ -167,6 +167,7 @@ The server starts on the first dictation and stops after 10 idle minutes.
 | `REVIEW_INBOX_STT_PORT` | page port + 1 | where `whisper-server` listens |
 | `REVIEW_INBOX_NO_TOAST` | | no desktop notifications |
 | `REVIEW_INBOX_NO_SERVER` | | `add` doesn't start the page server (run `review.py serve` yourself) |
+| `REVIEW_INBOX_BOARD_ONLY` | | `1`: the session still shows on the board, but the hooks don't tell it about the inbox or hold its turns. Put it under `env` in a project's `.claude/settings.json` to opt that project out |
 | `REVIEW_INBOX_SESSION` | | the session id for agents without `CLAUDE_CODE_SESSION_ID` (same as `--session`) |
 | `REVIEW_INBOX_BY` | | default `--by` label on posts |
 | `REVIEW_INBOX_BEAT_S` | `5` | how often `wait` checks for an answer |
