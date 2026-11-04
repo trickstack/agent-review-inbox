@@ -10,6 +10,7 @@ project (each item is labelled with its project), and answers
 **OK** or **Redo** with a note and sometimes images. Every command below is `python review.py ...`, with `review.py` in this
 skill's directory. The SessionStart hook prints the full command line: use exactly that one, since it can carry
 `--session <id>`, which ties your items to you in agents that don't set `CLAUDE_CODE_SESSION_ID` (Codex, others).
+**Subagents:** a background subagent posts with its parent's `--session` and should add `--by "<its description>"` (the Agent call's description) to `add`/`ask`: the page lists subagents under their session and counts their open items by that label.
 
 ## The loop
 

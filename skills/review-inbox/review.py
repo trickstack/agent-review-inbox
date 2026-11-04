@@ -1088,6 +1088,31 @@ def app_sessions():
     return out
 
 
+SUB_LIVE_S, SUB_GONE_S = 600, 3600  # a subagent whose transcript hasn't moved for 10 min counts as idle, for an hour; a finished one shows 10 min
+
+
+def subagents(sid, everything, now):
+    """A session's background subagents, from Claude Code's transcript folder (<projects>/*/<sid>/subagents/agent-*.meta.json
+    next to agent-*.jsonl). Not a documented interface: nothing there, nothing listed. An item tagged `--by <description>`
+    counts toward its subagent's open number."""
+    cfg = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
+    out = []
+    for f in glob.glob(os.path.join(cfg, "projects", "*", re.sub(r"[^A-Za-z0-9_-]", "", sid) or "_", "subagents", "agent-*.meta.json")):
+        try:
+            with open(f, encoding="utf-8") as fh:
+                m = json.load(fh)
+            last = os.path.getmtime(f[:-len(".meta.json")] + ".jsonl")
+        except (OSError, ValueError):
+            continue
+        done, name = bool(m.get("finished")), m.get("description") or m.get("agentType") or "subagent"
+        if now - last > (SUB_LIVE_S if done else SUB_GONE_S):
+            continue
+        out.append(dict(id=os.path.basename(f)[:-len(".meta.json")], name=name, type=m.get("agentType", ""), model=m.get("model", ""),
+                        done=done, busy=not done and now - last < SUB_LIVE_S, last=last,
+                        open=sum(1 for i in everything if i.get("sid") == sid and i.get("by") == name and i["status"] == "open")))
+    return sorted(out, key=lambda x: x["id"])
+
+
 def sessions():
     """The live sessions for the page: working or idle, with what they have in the inbox. Dead ones are removed."""
     now, app, everything = time.time(), app_sessions(), items()
@@ -1120,7 +1145,8 @@ def sessions():
                 s["asks"], s["done"] = "", False
         s["done"] = s.get("done") and not mine_open  # an item posted after its turn ended still needs you
         out.append({**s, "name": a.get("name") or s.get("prompt") or "", "open": len(mine_open),
-                    "waiting": any(waiting(i["id"]) for i in mine_open)})
+                    "waiting": any(waiting(i["id"]) for i in mine_open),
+                    "subagents": subagents(s["sid"], everything, now)})
     return {"now": now, "warm_min": WARM_MIN, "sessions": out}
 
 

@@ -143,6 +143,7 @@
   .scard .sp, .scard .si { font:clamp(11px, 9cqh, 12px)/1.35 var(--mono); color:var(--dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .scard .ss { font:clamp(11px, 10cqh, 13px)/1.35 var(--mono); font-variant-numeric:tabular-nums; color:var(--text2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:auto; }
   .scard:not(.busy) .ss { color:var(--dim); }
+  .scard.sub { border-style:dashed; }  /* a subagent: dashed, under its session */
   .scard.done { opacity:.6; } .scard.done:hover { opacity:1; }
   .sx { position:absolute; top:4px; right:4px; width:24px; height:24px; padding:0; border:0; border-radius:6px; cursor:pointer;
     background:transparent; color:var(--dim); font:16px/24px var(--sans); opacity:0; transition:opacity .15s var(--ease), background-color .15s var(--ease); }
@@ -454,16 +455,37 @@ function drawSessions() {
   const now = S.now + (performance.now() - sAt) / 1000, g = document.getElementById("sgrid");
   // needs you: blocked on an inbox item, or its last turn asked you something in the chat
   const needs = s => s.waiting || !!s.asks, rank = s => needs(s) ? 0 : s.busy ? 1 : s.done ? 3 : 2;
-  const list = S.sessions.slice().sort((a, b) => rank(a) - rank(b) || (a.busy ? a.turn - b.turn : b.last - a.last));
-  const busy = list.filter(s => s.busy).length, wait = list.filter(needs).length, done = list.filter(s => s.done && !needs(s)).length;
-  document.getElementById("scount").textContent = list.length
-    ? `${busy} working · ${list.length - busy - done} idle` + (wait ? ` · ${wait} waiting` : "") + (done ? ` · ${done} done` : "") : "";
-  if (!list.length) return g.innerHTML = `<div class="none">No sessions yet. Each Claude Code session with this plugin shows up here.</div>`;
+  const parents = S.sessions.slice().sort((a, b) => rank(a) - rank(b) || (a.busy ? a.turn - b.turn : b.last - a.last));
+  const busy = parents.filter(s => s.busy).length, wait = parents.filter(needs).length, done = parents.filter(s => s.done && !needs(s)).length;
+  // each session's subagents follow it as small cards (sub: true); they count in the header line apart from the sessions
+  const list = parents.flatMap(s => [s, ...(s.subagents || []).map(a => ({ ...a, sub: true, sid: s.sid, key: s.sid + "/" + a.id, project: s.project, project_dir: s.project_dir, parent: s.name || s.project }))]);
+  const subs = list.length - parents.length, subBusy = list.filter(s => s.sub && s.busy).length;
+  document.getElementById("scount").textContent = parents.length
+    ? `${busy} working · ${parents.length - busy - done} idle` + (wait ? ` · ${wait} waiting` : "") + (done ? ` · ${done} done` : "") + (subs ? ` · ${subs} subagents (${subBusy} running)` : "") : "";
+  if (!parents.length) return g.innerHTML = `<div class="none">No sessions yet. Each Claude Code session with this plugin shows up here.</div>`;
   fitSessions(g, list.length);
   const projects = new Set(list.map(s => s.project)).size > 1;
   // keyed like the inbox cards: a card is rebuilt only when what it says changes, so its pulse doesn't restart every tick
-  const old = new Map([...g.querySelectorAll(".scard")].map(c => [c.dataset.sid, c]));
+  const old = new Map([...g.querySelectorAll(".scard")].map(c => [c.dataset.key, c]));
   const nodes = list.map(s => {
+    if (s.sub) {  // a subagent: its description, running or finished, and what it has open in the inbox
+      const st = s.done ? "finished" : s.busy ? "running" : "idle", inbox = s.open ? `${s.open} open in the inbox` : "";
+      const key = JSON.stringify([s.name, st, inbox, s.sid === sess]);
+      let c = old.get(s.key);
+      if (!c || c._key !== key) {
+        const t = document.createElement("template");
+        t.innerHTML = `<div class="scard sub${s.busy ? " busy" : ""}${s.done ? " done" : ""}${s.sid === sess ? " sel" : ""}" data-sid="${esc(s.sid)}" data-key="${esc(s.key)}"
+          role="button" tabindex="0" title="${esc("Subagent of " + s.parent + (s.model ? " (" + s.model + ")" : ""))}"><div class="sn">${esc(s.name)}</div>
+          <div class="sp">subagent of ${esc(s.parent)}</div><div class="ss"><span class="dot"></span><span class="st"></span></div>
+          ${inbox ? `<div class="si">${esc(inbox)}</div>` : ""}</div>`;
+        const n = t.content.firstChild;
+        n._key = key;
+        if (c) c.replaceWith(n);
+        c = n;
+      }
+      c.querySelector(".st").textContent = s.done ? "finished " + fmt(now - s.last) + " ago" : s.busy ? "running, last activity " + fmt(now - s.last) : "idle " + fmt(now - s.last);
+      return c;
+    }
     const idle = now - s.last, cold = !s.busy && idle >= S.warm_min * 60;
     const inbox = s.waiting ? "waiting on you" : s.asks ? "asks: " + s.asks : s.open ? `${s.open} open in the inbox` : "";
     const fin = s.done && !needs(s), name = s.name || s.project || s.sid.slice(0, 8);
@@ -471,7 +493,7 @@ function drawSessions() {
     let c = old.get(s.sid);
     if (!c || c._key !== key) {
       const t = document.createElement("template");
-      t.innerHTML = `<div class="scard${s.busy ? " busy" : ""}${needs(s) ? " waiting" : ""}${fin ? " done" : ""}${s.sid === sess ? " sel" : ""}" data-sid="${esc(s.sid)}"
+      t.innerHTML = `<div class="scard${s.busy ? " busy" : ""}${needs(s) ? " waiting" : ""}${fin ? " done" : ""}${s.sid === sess ? " sel" : ""}" data-sid="${esc(s.sid)}" data-key="${esc(s.sid)}"
         role="button" tabindex="0" title="${esc(s.asks || s.project_dir || "")}"><div class="sn">${esc(name)}</div>
         ${projects && s.name ? `<div class="sp">${esc(s.project)}</div>` : ""}<div class="ss"><span class="dot"></span><span class="st"></span></div>
         ${inbox ? `<div class="si">${esc(inbox)}</div>` : ""}${s.busy || fin ? "" : `<div class="sb${cold ? " cold" : ""}"><i></i></div>`}

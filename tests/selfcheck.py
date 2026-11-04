@@ -367,4 +367,15 @@ s["last"] -= review.WARM_MIN * 60 + 1
 json.dump(s, open(p, "w"))
 assert "b-chat" not in [s["sid"] for s in review.sessions()["sessions"]]
 
+# a session's background subagents (Claude Code's <projects>/*/<sid>/subagents/) list under it: running, finished, and long-finished gone
+cfg = os.path.join(tmp, "claude"); os.environ["CLAUDE_CONFIG_DIR"] = cfg
+sub = os.path.join(cfg, "projects", "proj", "b-sub", "subagents"); os.makedirs(sub)
+for aid, meta in (("agent-1", {"description": "Fix hull"}), ("agent-2", {"description": "Fix fauna", "finished": True}), ("agent-3", {"description": "Old", "finished": True})):
+    json.dump(meta, open(os.path.join(sub, aid + ".meta.json"), "w")); open(os.path.join(sub, aid + ".jsonl"), "w").close()
+old = time.time() - review.SUB_LIVE_S - 5
+os.utime(os.path.join(sub, "agent-3.jsonl"), (old, old))
+got = {a["name"]: a for a in review.subagents("b-sub", [], time.time())}
+assert set(got) == {"Fix hull", "Fix fauna"} and got["Fix hull"]["busy"] and got["Fix fauna"]["done"], got
+assert review.subagents("nobody", [], time.time()) == []
+
 print("selfcheck ok")
