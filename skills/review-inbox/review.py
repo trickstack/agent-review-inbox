@@ -1043,8 +1043,10 @@ INJECTED = ("<task-notification", "<agent-message", "<system-reminder", "<comman
 
 def injected(prompt):
     """Prompts the harness puts in the human's slot (background-task and subagent notices, hand-backs): never the human's
-    chat answer, so they close no question and don't move the 'previous message' mark."""
-    return (prompt or "").lstrip().lower().startswith(INJECTED)
+    chat answer, so they close no question and don't move the 'previous message' mark. A human message the app prefixes
+    with a <system-reminder> block (e.g. "started without a project folder") is still the human's: judge what follows it."""
+    text = re.sub(r"(?s)<system-reminder>.*?</system-reminder>", "", prompt or "").strip()
+    return not text or text.lower().startswith(INJECTED)
 GONE_MIN = 60  # an idle session with nothing in the inbox drops off the page after this long (no SessionEnd if it crashed)
 DONE_S = 120  # a session that finished (asked nothing, nothing open) shows "done" this long, then leaves the board
 
@@ -1492,7 +1494,7 @@ if __name__ == "__main__":
     elif args.cmd == "ask":
         q, how = args.question, ""
         if len(q) > 140:  # a long question: the first sentence is the card's title, the whole text goes in the context box
-            q = re.split(r"(?<=[.?!:])\s|\n", q.strip(), maxsplit=1)[0][:140]
+            q = re.split(r"(?<=[.?!])\s|\n", q.strip(), maxsplit=1)[0][:140]  # "Valheim: build it?" — a colon doesn't end it
             how = args.question.strip()
         item, d = add("question", q, args.topic, how=how, by=args.by, options=args.options)
         ensure_server()

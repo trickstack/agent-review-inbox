@@ -171,6 +171,11 @@ assert {i["title"]: i for i in review.items() if i["sid"] == "q3"}["Notice test?
 subprocess.run([sys.executable, CLI, "--session", "q4", "ask", "Which way? " + "More detail. " * 30], env=env, capture_output=True)
 lq = next(i for i in review.items() if i["sid"] == "q4")
 assert lq["title"] == "Which way?" and lq["how"].endswith("More detail."), lq
+subprocess.run([sys.executable, CLI, "--session", "q5", "ask", "Valheim: build the probe? " + "More detail. " * 30], env=env, capture_output=True)
+assert next(i for i in review.items() if i["sid"] == "q5")["title"] == "Valheim: build the probe?"
+# the app may prefix the human's message with a <system-reminder> block: still the human's prompt (it moves the mark)
+assert review.injected("<system-reminder>x</system-reminder>") and review.injected("<system-reminder>a</system-reminder>\n<task-notification>b")
+assert not review.injected("<system-reminder>No project folder.</system-reminder>\nLet's do Valheim instead")
 
 
 def stop_after(text, active=False, sid="q2", transcript=None):

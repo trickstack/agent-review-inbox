@@ -56,7 +56,7 @@
   .card.waiting { border-color:color-mix(in srgb, var(--accent) 45%, transparent); }
   .card.waiting::before { content:""; position:absolute; left:-1px; top:16px; bottom:16px; width:3px; border-radius:0 2px 2px 0; background:var(--accent); }
   .card:not(.waiting) .wbadge { display:none; }
-  .head { display:flex; gap:8px 12px; align-items:baseline; flex-wrap:wrap; }
+  .head { margin-bottom:12px; display:flex; gap:8px 12px; align-items:baseline; flex-wrap:wrap; }
   .title { font-size:16px; line-height:24px; font-weight:500; }
   .tag { font:12px/16px var(--mono); color:var(--dim); }
   .wbadge { color:var(--accent-ink); }
@@ -64,7 +64,7 @@
   .s-ok { color:var(--ok); } .s-redo { color:var(--redo); } .s-answered { color:var(--text2); }
   button.pchip { background:none; border:0; padding:0; cursor:pointer; } button.pchip:hover { color:var(--text); text-decoration:underline; }
   .meta { margin-left:auto; }
-  .how { margin:8px 0 16px; color:var(--text2); white-space:pre-wrap; overflow-wrap:anywhere; }
+  .how { margin:0 0 16px; color:var(--text2); white-space:pre-wrap; overflow-wrap:anywhere; }
 
   /* the take on a viewer stage, no dead space: one clip full width; two side by side; three or four as one big clip with the
      rest stacked beside it (n-1 : 1 columns, so 16:9 clips line up flush); five or more two to a row */
@@ -81,6 +81,7 @@
   .media .aud { grid-column:1 / -1; display:flex; flex-direction:column; gap:4px; font:12px var(--mono); color:#a1a1a6; }
   @media (max-width:700px) { .media { display:flex; flex-direction:column; } }
   .files { display:flex; flex-wrap:wrap; gap:4px 16px; margin-bottom:16px; }
+  .files:empty { display:none; }
   .files a { font:12px/16px var(--mono); color:var(--dim); }
 
   .answer { background:var(--deep); border:1px solid var(--line); border-radius:10px; padding:8px; }

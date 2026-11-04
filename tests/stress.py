@@ -232,7 +232,8 @@ def round_(r):
         assert open(os.path.join(INBOX, victim, "item.json"), encoding="utf-8").read() == before
         for i in [R[s], R2.get(s)]:
             if i and status.get(i) in ("ok", "redo"):
-                assert cli(s, proj[s], "handled", i, f"committed {s}").returncode == 0
+                did = ["--did", f"did the note {s}"] if status[i] == "ok" else []  # an OK with a note needs --did
+                assert cli(s, proj[s], "handled", i, f"committed {s}", *did).returncode == 0
     with ThreadPoolExecutor(len(S)) as ex:
         list(ex.map(step5, range(len(S))))
     got = stops()
