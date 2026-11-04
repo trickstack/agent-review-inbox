@@ -389,6 +389,8 @@ open(os.path.join(sub, "agent-1.jsonl"), "w").write('{"type":"user"}\n{"type":"u
 assert next(a for a in review.subagents("b-sub", [], time.time()) if a["name"] == "Fix hull")["done"]
 open(os.path.join(sub, "agent-1.jsonl"), "w").close()
 assert review.subagents("nobody", [], time.time()) == []
+review.hide_subagent("b-sub", "agent-2")  # the x on one subagent hides just it
+assert {a["name"] for a in review.subagents("b-sub", [], time.time())} == {"Fix hull"}
 # an idle, long-quiet parent stays on the board while a subagent of it runs
 json.dump({"sid": "b-sub", "started": time.time() - 9999, "last": time.time() - review.GONE_MIN * 60 - 5, "project": "p", "project_dir": "p"}, open(os.path.join(review.SESSIONS, "b-sub.json"), "w"))
 assert "b-sub" in [x["sid"] for x in review.sessions()["sessions"]]

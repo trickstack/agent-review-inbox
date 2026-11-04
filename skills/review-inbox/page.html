@@ -143,11 +143,10 @@
   .scard .sp, .scard .si { font:clamp(11px, 9cqh, 12px)/1.35 var(--mono); color:var(--dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .scard .ss { font:clamp(11px, 10cqh, 13px)/1.35 var(--mono); font-variant-numeric:tabular-nums; color:var(--text2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:auto; }
   .scard:not(.busy) .ss { color:var(--dim); }
-  /* a subagent hangs under its session: indented, pulled up close, a rail down its left edge, and "subagent" in its label */
-  .scard.sub { margin-left:16px; margin-top:-5px; background:transparent; }
-  .scard.sub::after { content:""; position:absolute; left:0; top:0; bottom:0; width:2px; background:var(--line2); }
-  .scard.sub.busy::after { background:var(--ok); }
-  .scard .tagsub { text-transform:uppercase; letter-spacing:.06em; font:10px/1.2 var(--mono); margin-right:6px; padding:1px 5px; vertical-align:1px; color:var(--dim); border:1px solid var(--line2); border-radius:4px; }
+  /* a session with subagents: it and its subagents share a colour strip along the top, so the group reads as one */
+  .scard.grp::after { content:""; position:absolute; left:0; right:0; top:0; height:3px; background:var(--g); }
+  .scard.sub { background:transparent; }
+  .scard .tagsub { font:10px/1.2 var(--mono); text-transform:uppercase; letter-spacing:.06em; margin-right:6px; padding:1px 5px; vertical-align:1px; color:var(--dim); border:1px solid var(--line2); border-radius:4px; }
   .scard.done { opacity:.6; } .scard.done:hover { opacity:1; }
   .sx { position:absolute; top:4px; right:4px; width:24px; height:24px; padding:0; border:0; border-radius:6px; cursor:pointer;
     background:transparent; color:var(--dim); font:16px/24px var(--sans); opacity:0; transition:opacity .15s var(--ease), background-color .15s var(--ease); }
@@ -173,7 +172,6 @@
     /* one row that scrolls sideways, so the inbox stays on the first screen however many sessions there are */
     #sgrid { display:flex; overflow-x:auto; scroll-snap-type:x proximity; padding-bottom:4px; }
     .scard { flex:0 0 200px; scroll-snap-align:start; container-type:normal; padding:12px; gap:4px; }  /* sized by their text here */
-    .scard.sub { margin:0 0 0 -4px; flex-basis:180px; }  /* in the sideways row: no indent, the rail and the label say it */
     .scard .sn { font-size:13px; } .scard .sp, .scard .si { font-size:12px; } .scard .ss { font-size:12px; margin-top:4px; }
     #inbox { padding:0 16px 48px; }
     .card { padding:16px; }
@@ -417,6 +415,7 @@ document.addEventListener("click", async e => {
   if (t.id === "more") { limit += PAGE; return render(); }
   if (t.dataset.proj !== undefined || t.dataset.allproj !== undefined) { proj = t.dataset.proj ?? null; limit = PAGE; return render(); }
   if (t.dataset.hide) return hideSession(t.dataset.hide);
+  if (t.dataset.hidesub) return hideSub(t.dataset.sid, t.dataset.hidesub);
   const sc = t.dataset.sid !== undefined ? t : e.target.closest(".scard");  // a session card, or the bar's "Show all"
   if (sc) { sess = sc.dataset.sid && sc.dataset.sid !== sess ? sc.dataset.sid : null; limit = PAGE; drawSessions(); return render(); }
   if (t.classList.contains("opt")) {
@@ -463,26 +462,27 @@ function drawSessions() {
   const parents = S.sessions.slice().sort((a, b) => rank(a) - rank(b) || (a.busy ? a.turn - b.turn : b.last - a.last));
   const busy = parents.filter(s => s.busy).length, wait = parents.filter(needs).length, done = parents.filter(s => s.done && !needs(s)).length;
   // each session's subagents follow it as small cards (sub: true); they count in the header line apart from the sessions
-  const list = parents.flatMap(s => [s, ...(s.subagents || []).map(a => ({ ...a, sub: true, sid: s.sid, key: s.sid + "/" + a.id, project: s.project, project_dir: s.project_dir, parent: s.name || s.project }))]);
+  const list = parents.flatMap((s, gi) => [{ ...s, g: s.subagents?.length ? gi % 5 : -1 }, ...(s.subagents || []).map(a => ({ ...a, sub: true, g: gi % 5, sid: s.sid, key: s.sid + "/" + a.id, project: s.project, project_dir: s.project_dir, parent: s.name || s.project }))]);
   const subs = list.length - parents.length, subBusy = list.filter(s => s.sub && s.busy).length;
   document.getElementById("scount").textContent = parents.length
     ? `${busy} working · ${parents.length - busy - done} idle` + (wait ? ` · ${wait} waiting` : "") + (done ? ` · ${done} done` : "") + (subs ? ` · ${subs} subagents (${subBusy} running)` : "") : "";
   if (!parents.length) return g.innerHTML = `<div class="none">No sessions yet. Each Claude Code session with this plugin shows up here.</div>`;
-  fitSessions(g, list.length, subs > 0);
+  fitSessions(g, list.length);
   const projects = new Set(list.map(s => s.project)).size > 1;
   // keyed like the inbox cards: a card is rebuilt only when what it says changes, so its pulse doesn't restart every tick
   const old = new Map([...g.querySelectorAll(".scard")].map(c => [c.dataset.key, c]));
   const nodes = list.map(s => {
     if (s.sub) {  // a subagent: its description, running or finished, and what it has open in the inbox
       const st = s.done ? "finished" : s.busy ? "running" : "idle", inbox = s.open ? `${s.open} open in the inbox` : "";
-      const key = JSON.stringify([s.name, st, inbox, s.sid === sess]);
+      const key = JSON.stringify([s.name, st, inbox, s.sid === sess, s.g]);
       let c = old.get(s.key);
       if (!c || c._key !== key) {
         const t = document.createElement("template");
-        t.innerHTML = `<div class="scard sub${s.busy ? " busy" : ""}${s.done ? " done" : ""}${s.sid === sess ? " sel" : ""}" data-sid="${esc(s.sid)}" data-key="${esc(s.key)}"
+        t.innerHTML = `<div class="scard sub grp${s.busy ? " busy" : ""}${s.done ? " done" : ""}${s.sid === sess ? " sel" : ""}" data-sid="${esc(s.sid)}" data-key="${esc(s.key)}" style="--g:${GROUPS[s.g]}"
           role="button" tabindex="0" title="${esc("Subagent of " + s.parent + (s.model ? " (" + s.model + ")" : ""))}"><div class="sn"><span class="tagsub">subagent</span>${esc(s.name)}</div>
           <div class="sp">of ${esc(s.parent)}</div><div class="ss"><span class="dot"></span><span class="st"></span></div>
-          ${inbox ? `<div class="si">${esc(inbox)}</div>` : ""}</div>`;
+          ${inbox ? `<div class="si">${esc(inbox)}</div>` : ""}
+          <button class="sx" data-hidesub="${esc(s.id)}" data-sid="${esc(s.sid)}" title="Remove this subagent from the board" aria-label="Remove ${esc(s.name)} from the board">×</button></div>`;
         const n = t.content.firstChild;
         n._key = key;
         if (c) c.replaceWith(n);
@@ -496,11 +496,11 @@ function drawSessions() {
     const fin = s.done && !needs(s), name = s.name || s.project || s.sid.slice(0, 8);
     const kids = s.subagents || [], run = kids.filter(a => a.busy).length;
     const subLine = kids.length ? `${kids.length} subagent${kids.length > 1 ? "s" : ""}, ${run} running` : "";
-    const key = JSON.stringify([name, projects, s.busy, needs(s), fin, inbox, subLine, s.sid === sess, cold]);
+    const key = JSON.stringify([name, projects, s.busy, needs(s), fin, inbox, subLine, s.sid === sess, cold, s.g]);
     let c = old.get(s.sid);
     if (!c || c._key !== key) {
       const t = document.createElement("template");
-      t.innerHTML = `<div class="scard${s.busy ? " busy" : ""}${needs(s) ? " waiting" : ""}${fin ? " done" : ""}${s.sid === sess ? " sel" : ""}" data-sid="${esc(s.sid)}" data-key="${esc(s.sid)}"
+      t.innerHTML = `<div class="scard${s.g >= 0 ? " grp" : ""}${s.busy ? " busy" : ""}${needs(s) ? " waiting" : ""}${fin ? " done" : ""}${s.sid === sess ? " sel" : ""}" data-sid="${esc(s.sid)}" data-key="${esc(s.sid)}"${s.g >= 0 ? ` style="--g:${GROUPS[s.g]}"` : ""}
         role="button" tabindex="0" title="${esc(s.asks || s.project_dir || "")}"><div class="sn">${esc(name)}</div>
         ${projects && s.name ? `<div class="sp">${esc(s.project)}</div>` : ""}<div class="ss"><span class="dot"></span><span class="st"></span></div>
         ${inbox ? `<div class="si">${esc(inbox)}</div>` : ""}${subLine ? `<div class="si">${esc(subLine)}</div>` : ""}${s.busy || fin ? "" : `<div class="sb${cold ? " cold" : ""}"><i></i></div>`}
@@ -521,17 +521,23 @@ function drawSessions() {
 }
 // as many columns as keeps each card biggest (at a card's shape, ~2.2:1, so a name fits on a line or two); ties go to more
 // columns, so cards stay card-sized. The columns share the full width: no dead strip on the right
-function fitSessions(g, n, oneColumn) {  // oneColumn: with subagents, they stack under their session
+function fitSessions(g, n) {
   if (matchMedia("(max-width:1099px)").matches) return;  // the narrow layout's CSS takes over
   const W = g.clientWidth, H = g.clientHeight, gap = 8, MAXH = 150;  // gap as #sgrid's CSS
   let cols = 1, best = 0;
-  for (let c = 1; c <= (oneColumn ? 1 : n); c++) {
+  for (let c = 1; c <= n; c++) {
     const r = Math.ceil(n / c), w = (W - gap * (c - 1)) / c, h = Math.min(MAXH, (H - gap * (r - 1)) / r), sz = Math.min(w / 2.2, h);
     if (sz >= best) { best = sz; cols = c; }
   }
   const rows = Math.ceil(n / cols);
   g.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
   g.style.gridAutoRows = Math.max(44, Math.min(MAXH, (H - gap * (rows - 1)) / rows)) + "px";
+}
+const GROUPS = ["#6c9bd2", "#d2a06c", "#8fc27a", "#c27aa8", "#7ac2bd"];  // one muted colour per session that has subagents
+async function hideSub(sid, id) {
+  await fetch("/api/subagents/hide", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sid, id }) });
+  for (const s of S.sessions) if (s.sid === sid) s.subagents = (s.subagents || []).filter(a => a.id !== id);
+  drawSessions();
 }
 async function hideSession(sid) {
   await fetch("/api/sessions/hide", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sid }) });

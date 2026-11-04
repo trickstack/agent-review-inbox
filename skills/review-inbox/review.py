@@ -1125,6 +1125,8 @@ def subagents(sid, everything, now):
             last = os.path.getmtime(f[:-len(".meta.json")] + ".jsonl")
         except (OSError, ValueError):
             continue
+        if os.path.exists(os.path.join(SESSIONS, "hidden-" + os.path.basename(f)[:-len(".meta.json")])):
+            continue
         done, name = bool(m.get("finished")) or handed_back(f[:-len(".meta.json")] + ".jsonl"), m.get("description") or m.get("agentType") or "subagent"
         if now - last > (SUB_LIVE_S if done else SUB_GONE_S):
             continue
@@ -1132,6 +1134,13 @@ def subagents(sid, everything, now):
                         done=done, busy=not done and now - last < SUB_LIVE_S, last=last,
                         open=sum(1 for i in everything if i.get("sid") == sid and i.get("by") == name and i["status"] == "open")))
     return sorted(out, key=lambda x: x["id"])
+
+
+def hide_subagent(sid, aid):
+    """The x on a subagent card: that subagent leaves the board (a marker file; its transcript is untouched)."""
+    os.makedirs(SESSIONS, exist_ok=True)
+    open(os.path.join(SESSIONS, "hidden-" + re.sub(r"[^A-Za-z0-9_-]", "", aid)), "w").close()
+    return {"hidden": aid}
 
 
 def sessions():
@@ -1342,6 +1351,14 @@ def serve():
                 try:
                     body = json.loads(self.rfile.read(min(int(self.headers.get("Content-Length", 0)), 4096)) or b"{}")
                     return self.send_body(json.dumps(hide_session(str(body.get("sid", "")))))
+                except (ValueError, OSError) as e:
+                    return self.send_error(400, str(e))
+            if self.path == "/api/subagents/hide":  # the x on a subagent card
+                if not self.headers.get("Content-Type", "").startswith("application/json"):
+                    return self.send_error(415)
+                try:
+                    body = json.loads(self.rfile.read(min(int(self.headers.get("Content-Length", 0)), 4096)) or b"{}")
+                    return self.send_body(json.dumps(hide_subagent(str(body.get("sid", "")), str(body.get("id", "")))))
                 except (ValueError, OSError) as e:
                     return self.send_error(400, str(e))
             if self.path == "/api/stt/download":  # the human said yes to the model download
