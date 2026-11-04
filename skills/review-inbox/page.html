@@ -66,14 +66,20 @@
   .meta { margin-left:auto; }
   .how { margin:8px 0 16px; color:var(--text2); white-space:pre-wrap; overflow-wrap:anywhere; }
 
-  /* the take on a viewer stage: each clip or still keeps its own shape, one big, several side by side */
-  .media { display:flex; flex-wrap:wrap; justify-content:center; align-items:flex-start; gap:8px; margin:0 0 8px; padding:12px;
+  /* the take on a viewer stage, no dead space: one clip full width; two side by side; three or four as one big clip with the
+     rest stacked beside it (n-1 : 1 columns, so 16:9 clips line up flush); five or more two to a row */
+  .media { display:grid; grid-template-columns:minmax(0, 1fr); align-items:start; gap:8px; margin:0 0 8px; padding:8px;
     background:var(--stage); border-radius:10px; }
   .media:empty { display:none; }
-  .media > * { max-width:100%; }
-  .media img, .media video { display:block; width:auto; height:auto; max-width:100%; max-height:480px; border-radius:4px; }
-  .media.multi img, .media.multi video { max-height:280px; max-width:calc(50% - 4px); }
-  .media .aud { flex:1 1 100%; display:flex; flex-direction:column; gap:4px; font:12px var(--mono); color:#a1a1a6; }
+  .media:has(> :nth-child(2)) { grid-template-columns:repeat(2, minmax(0, 1fr)); }
+  .media:has(> :nth-child(3):last-child) { grid-template-columns:minmax(0, 2fr) minmax(0, 1fr); }
+  .media:has(> :nth-child(3):last-child) > :first-child { grid-row:span 2; }
+  .media:has(> :nth-child(4):last-child) { grid-template-columns:minmax(0, 3fr) minmax(0, 1fr); }
+  .media:has(> :nth-child(4):last-child) > :first-child { grid-row:span 3; }
+  .media > a { display:block; }
+  .media img, .media video { display:block; width:100%; height:auto; max-height:75vh; object-fit:contain; border-radius:4px; }
+  .media .aud { grid-column:1 / -1; display:flex; flex-direction:column; gap:4px; font:12px var(--mono); color:#a1a1a6; }
+  @media (max-width:700px) { .media { display:flex; flex-direction:column; } }
   .files { display:flex; flex-wrap:wrap; gap:4px 16px; margin-bottom:16px; }
   .files a { font:12px/16px var(--mono); color:var(--dim); }
 
@@ -202,7 +208,7 @@ function media(i) {
     ? `<div class="aud"><span>${esc(m)}</span><audio src="${base + encodeURIComponent(m)}" controls preload="none"></audio></div>`
     : `<a href="${base + encodeURIComponent(m)}" target="_blank"><img src="${base + encodeURIComponent(m)}" loading="lazy"></a>`).join("");
   const files = i.media.map(m => `<a href="${base + encodeURIComponent(m)}" target="_blank">${esc(m)}</a>`).join("");
-  return `<div class="media${shown.length > 1 ? " multi" : ""}">${vis}</div><div class="files">${files}</div>`;
+  return `<div class="media">${vis}</div><div class="files">${files}</div>`;
 }
 
 function card(i) {
@@ -484,17 +490,18 @@ function drawSessions() {
   [...g.children].forEach(c => keep.has(c) || c.remove());
   nodes.forEach((n, k) => { if (g.children[k] !== n) g.insertBefore(n, g.children[k] || null); });
 }
-// as many columns as keeps each card biggest (at a card's shape, ~2.2:1, so a name fits on a line or two), capped so two sessions don't make two billboards
+// as many columns as keeps each card biggest (at a card's shape, ~2.2:1, so a name fits on a line or two); ties go to more
+// columns, so cards stay card-sized. The columns share the full width: no dead strip on the right
 function fitSessions(g, n) {
   if (matchMedia("(max-width:1099px)").matches) return;  // the narrow layout's CSS takes over
-  const W = g.clientWidth, H = g.clientHeight, gap = 10, MAXH = 150, MAXW = 360;
+  const W = g.clientWidth, H = g.clientHeight, gap = 8, MAXH = 150;  // gap as #sgrid's CSS
   let cols = 1, best = 0;
   for (let c = 1; c <= n; c++) {
-    const r = Math.ceil(n / c), w = Math.min(MAXW, (W - gap * (c - 1)) / c), h = Math.min(MAXH, (H - gap * (r - 1)) / r), sz = Math.min(w / 2.2, h);
+    const r = Math.ceil(n / c), w = (W - gap * (c - 1)) / c, h = Math.min(MAXH, (H - gap * (r - 1)) / r), sz = Math.min(w / 2.2, h);
     if (sz >= best) { best = sz; cols = c; }
   }
   const rows = Math.ceil(n / cols);
-  g.style.gridTemplateColumns = `repeat(${cols}, minmax(0, ${Math.min(MAXW, (W - gap * (cols - 1)) / cols)}px))`;
+  g.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
   g.style.gridAutoRows = Math.max(44, Math.min(MAXH, (H - gap * (rows - 1)) / rows)) + "px";
 }
 async function hideSession(sid) {

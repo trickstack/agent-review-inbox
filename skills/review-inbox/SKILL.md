@@ -31,6 +31,11 @@ skill's directory. The SessionStart hook prints the full command line: use exact
    - Write `--how` in calm, plain prose: where to look, what changed, what you want judged. Claim only what the footage shows.
    - Several takes go in one `add` (`--media a/clip.mp4 b/clip.mp4`), each path once, each named for what it is
      (rename `clip.mp4` to `bigger-particles.mp4` first). Put your proposal first and comparisons last.
+   - Label every clip and still on the picture itself, in a corner: what it shows and, once there is more than one,
+     whether it is the change or a comparison (`AFTER: bow climb, first person`, `BEFORE: old climb, for comparison`).
+     The human sees the footage before the file names and must never mistake an old take for your fix. If your recorder
+     can't draw text, burn it in: `ffmpeg -i in.mp4 -vf "drawtext=text='AFTER\: bow climb':x=12:y=12:fontsize=h/18:fontcolor=white:box=1:boxcolor=black@0.6:boxborderw=8" -c:a copy out.mp4`.
+     Skip a BEFORE take unless the change is subtle enough to need one.
    - Show only what is new. Don't re-post variants the human already decided on.
    - `add` starts the page if it isn't running and pops a desktop notification, so you don't need to alert the human.
 4. **Wait.** Run `review.py wait` as a **background** command (`run_in_background`) and end your turn or keep working.
