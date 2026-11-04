@@ -377,5 +377,10 @@ os.utime(os.path.join(sub, "agent-3.jsonl"), (old, old))
 got = {a["name"]: a for a in review.subagents("b-sub", [], time.time())}
 assert set(got) == {"Fix hull", "Fix fauna"} and got["Fix hull"]["busy"] and got["Fix fauna"]["done"], got
 assert review.subagents("nobody", [], time.time()) == []
+# an idle, long-quiet parent stays on the board while a subagent of it runs
+json.dump({"sid": "b-sub", "started": time.time() - 9999, "last": time.time() - review.GONE_MIN * 60 - 5, "project": "p", "project_dir": "p"}, open(os.path.join(review.SESSIONS, "b-sub.json"), "w"))
+assert "b-sub" in [x["sid"] for x in review.sessions()["sessions"]]
+os.remove(os.path.join(sub, "agent-1.meta.json"))
+assert "b-sub" not in [x["sid"] for x in review.sessions()["sessions"]]
 
 print("selfcheck ok")

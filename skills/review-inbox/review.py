@@ -1125,10 +1125,11 @@ def sessions():
             continue
         a = app.get(s.get("sid"), {})
         mine_open = [i for i in everything if i.get("sid") == s.get("sid") and i["status"] == "open"]
-        idle = now - s.get("last", 0)
-        if (a.get("pid") and not pid_alive(int(a["pid"]))) or (s.get("done") and not mine_open and idle > DONE_S) or (
+        idle, subs = now - s.get("last", 0), subagents(s.get("sid", ""), everything, now)
+        running = any(x["busy"] for x in subs)  # a parent stays on the board as long as a subagent of it is running
+        if (a.get("pid") and not pid_alive(int(a["pid"]))) or (not running and (s.get("done") and not mine_open and idle > DONE_S or (
                 not a and not s.get("busy") and not mine_open and not s.get("asks") and idle > GONE_MIN * 60) or (
-                s.get("asks") and not s.get("busy") and not mine_open and idle > WARM_MIN * 60):  # a question left unanswered past the cache is stale
+                s.get("asks") and not s.get("busy") and not mine_open and idle > WARM_MIN * 60))):  # a question left unanswered past the cache is stale
             try:
                 os.remove(f)
             except OSError:
@@ -1143,10 +1144,10 @@ def sessions():
             s["busy"] = busy
             if busy:
                 s["asks"], s["done"] = "", False
-        s["done"] = s.get("done") and not mine_open  # an item posted after its turn ended still needs you
+        s["done"] = s.get("done") and not mine_open and not running  # an item posted after its turn ended still needs you
         out.append({**s, "name": a.get("name") or s.get("prompt") or "", "open": len(mine_open),
                     "waiting": any(waiting(i["id"]) for i in mine_open),
-                    "subagents": subagents(s["sid"], everything, now)})
+                    "subagents": subs})
     return {"now": now, "warm_min": WARM_MIN, "sessions": out}
 
 
