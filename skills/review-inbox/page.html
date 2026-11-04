@@ -147,7 +147,7 @@
   .scard.sub { margin-left:16px; margin-top:-5px; background:transparent; }
   .scard.sub::after { content:""; position:absolute; left:0; top:0; bottom:0; width:2px; background:var(--line2); }
   .scard.sub.busy::after { background:var(--ok); }
-  .scard .sp .tagsub { text-transform:uppercase; letter-spacing:.06em; font-size:10px; margin-right:6px; padding:1px 5px; border:1px solid var(--line2); border-radius:4px; }
+  .scard .tagsub { text-transform:uppercase; letter-spacing:.06em; font:10px/1.2 var(--mono); margin-right:6px; padding:1px 5px; vertical-align:1px; color:var(--dim); border:1px solid var(--line2); border-radius:4px; }
   .scard.done { opacity:.6; } .scard.done:hover { opacity:1; }
   .sx { position:absolute; top:4px; right:4px; width:24px; height:24px; padding:0; border:0; border-radius:6px; cursor:pointer;
     background:transparent; color:var(--dim); font:16px/24px var(--sans); opacity:0; transition:opacity .15s var(--ease), background-color .15s var(--ease); }
@@ -468,7 +468,7 @@ function drawSessions() {
   document.getElementById("scount").textContent = parents.length
     ? `${busy} working · ${parents.length - busy - done} idle` + (wait ? ` · ${wait} waiting` : "") + (done ? ` · ${done} done` : "") + (subs ? ` · ${subs} subagents (${subBusy} running)` : "") : "";
   if (!parents.length) return g.innerHTML = `<div class="none">No sessions yet. Each Claude Code session with this plugin shows up here.</div>`;
-  fitSessions(g, list.length);
+  fitSessions(g, list.length, subs > 0);
   const projects = new Set(list.map(s => s.project)).size > 1;
   // keyed like the inbox cards: a card is rebuilt only when what it says changes, so its pulse doesn't restart every tick
   const old = new Map([...g.querySelectorAll(".scard")].map(c => [c.dataset.key, c]));
@@ -480,8 +480,8 @@ function drawSessions() {
       if (!c || c._key !== key) {
         const t = document.createElement("template");
         t.innerHTML = `<div class="scard sub${s.busy ? " busy" : ""}${s.done ? " done" : ""}${s.sid === sess ? " sel" : ""}" data-sid="${esc(s.sid)}" data-key="${esc(s.key)}"
-          role="button" tabindex="0" title="${esc("Subagent of " + s.parent + (s.model ? " (" + s.model + ")" : ""))}"><div class="sn">${esc(s.name)}</div>
-          <div class="sp"><span class="tagsub">subagent</span>${esc(s.parent)}</div><div class="ss"><span class="dot"></span><span class="st"></span></div>
+          role="button" tabindex="0" title="${esc("Subagent of " + s.parent + (s.model ? " (" + s.model + ")" : ""))}"><div class="sn"><span class="tagsub">subagent</span>${esc(s.name)}</div>
+          <div class="sp">of ${esc(s.parent)}</div><div class="ss"><span class="dot"></span><span class="st"></span></div>
           ${inbox ? `<div class="si">${esc(inbox)}</div>` : ""}</div>`;
         const n = t.content.firstChild;
         n._key = key;
@@ -521,11 +521,11 @@ function drawSessions() {
 }
 // as many columns as keeps each card biggest (at a card's shape, ~2.2:1, so a name fits on a line or two); ties go to more
 // columns, so cards stay card-sized. The columns share the full width: no dead strip on the right
-function fitSessions(g, n) {
+function fitSessions(g, n, oneColumn) {  // oneColumn: with subagents, they stack under their session
   if (matchMedia("(max-width:1099px)").matches) return;  // the narrow layout's CSS takes over
   const W = g.clientWidth, H = g.clientHeight, gap = 8, MAXH = 150;  // gap as #sgrid's CSS
   let cols = 1, best = 0;
-  for (let c = 1; c <= n; c++) {
+  for (let c = 1; c <= (oneColumn ? 1 : n); c++) {
     const r = Math.ceil(n / c), w = (W - gap * (c - 1)) / c, h = Math.min(MAXH, (H - gap * (r - 1)) / r), sz = Math.min(w / 2.2, h);
     if (sz >= best) { best = sz; cols = c; }
   }
