@@ -391,6 +391,12 @@ open(os.path.join(sub, "agent-1.jsonl"), "w").close()
 assert review.subagents("nobody", [], time.time()) == []
 review.hide_subagent("b-sub", "agent-2")  # the x on one subagent hides just it
 assert {a["name"] for a in review.subagents("b-sub", [], time.time())} == {"Fix hull"}
+# a busy session with no app record (plain terminal, IDE, Codex) whose transcript went quiet is dropped, not "working" forever
+tp = os.path.join(tmp, "t.jsonl"); open(tp, "w").close()
+json.dump({"sid": "b-cli", "started": time.time() - 9999, "last": time.time() - 100, "busy": True, "transcript": tp, "project": "p", "project_dir": "p"}, open(os.path.join(review.SESSIONS, "b-cli.json"), "w"))
+assert "b-cli" in [x["sid"] for x in review.sessions()["sessions"]]
+os.utime(tp, (time.time() - review.GONE_MIN * 60 - 5,) * 2)
+assert "b-cli" not in [x["sid"] for x in review.sessions()["sessions"]]
 # an idle, long-quiet parent stays on the board while a subagent of it runs
 json.dump({"sid": "b-sub", "started": time.time() - 9999, "last": time.time() - review.GONE_MIN * 60 - 5, "project": "p", "project_dir": "p"}, open(os.path.join(review.SESSIONS, "b-sub.json"), "w"))
 assert "b-sub" in [x["sid"] for x in review.sessions()["sessions"]]

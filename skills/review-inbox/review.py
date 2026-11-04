@@ -1064,6 +1064,8 @@ def track(ev, blocked):
         s = {"sid": sid, "started": time.time()}
     proj = os.environ.get("CLAUDE_PROJECT_DIR") or ev.get("cwd") or project_dir()
     s.update(project=os.path.basename(os.path.normpath(proj)), project_dir=proj, last=time.time())
+    if ev.get("transcript_path"):
+        s["transcript"] = ev["transcript_path"]  # a session with no app record (plain CLI, IDE, Codex): its liveness
     if name == "UserPromptSubmit":
         if not s.get("busy"):
             s["turn"] = time.time()
@@ -1157,7 +1159,11 @@ def sessions():
         mine_open = [i for i in everything if i.get("sid") == s.get("sid") and i["status"] == "open"]
         idle, subs = now - s.get("last", 0), subagents(s.get("sid", ""), everything, now)
         running = any(x["busy"] for x in subs)  # a parent stays on the board as long as a subagent of it is running
-        if (a.get("pid") and not pid_alive(int(a["pid"]))) or (not running and (s.get("done") and not mine_open and idle > DONE_S or (
+        try:  # no app record and a transcript untouched for an hour: a terminal that was closed mid-turn (no SessionEnd) isn't "working"
+            quiet = not a and s.get("busy") and s.get("transcript") and now - os.path.getmtime(s["transcript"]) > GONE_MIN * 60
+        except OSError:
+            quiet = False
+        if (a.get("pid") and not pid_alive(int(a["pid"]))) or (quiet and not mine_open and not running) or (not running and (s.get("done") and not mine_open and idle > DONE_S or (
                 not a and not s.get("busy") and not mine_open and not s.get("asks") and idle > GONE_MIN * 60) or (
                 s.get("asks") and not s.get("busy") and not mine_open and idle > WARM_MIN * 60))):  # a question left unanswered past the cache is stale
             try:
