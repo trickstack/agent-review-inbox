@@ -107,6 +107,20 @@ assert hook("UserPromptSubmit") == ""
 assert "haven't acted" in hook("Stop")
 run("handled", item["id"], "reworked, retake posted")
 assert hook("Stop") == ""
+
+# an OK with a note: committing doesn't close it, acting on the note does
+ok_id = os.path.basename(run("add", "--title", "Wave hits", "--media", png).stdout.splitlines()[0])
+review.answer(ok_id, "ok", "good, but rework the spray and add a hull-slap sound")
+assert "This OK has a note" in hook("UserPromptSubmit")
+out = run("handled", ok_id, "committed abc123").stdout
+assert "isn't done yet" in out and "hull-slap" in out, out
+assert "--did" in hook("Stop")
+run("handled", ok_id, "--did", "reworked the spray, posted a new take; hull-slap sound started")
+assert hook("Stop") == ""
+plain = os.path.basename(run("add", "--title", "Plain OK", "--media", png).stdout.splitlines()[0])
+review.answer(plain, "ok", "")
+hook("UserPromptSubmit")
+assert "isn't done" not in run("handled", plain, "committed def456").stdout and hook("Stop") == ""
 assert "review inbox" in hook("SessionStart")
 
 # an agent without CLAUDE_CODE_SESSION_ID (Codex): the SessionStart hook hands it a CLI carrying --session

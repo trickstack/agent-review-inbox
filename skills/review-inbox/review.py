@@ -720,7 +720,7 @@ class recording_lock:
             pass
 
 
-KEPT = {"item.json", "delivered", "handled", "gaveup", "waiting.json"}  # an item's text and its loop marks
+KEPT = {"item.json", "delivered", "handled", "noted", "gaveup", "waiting.json"}  # an item's text and its loop marks
 
 
 def prune(force=False):
@@ -821,14 +821,31 @@ def cli(sid):
 def act(sid):
     return ("The human answered in the review inbox. This is work, not a notification: REDO = rework it and post the next take now; "
             f"OK = finish it (commit if your project's rules say so), then `{cli(sid)} handled <id> \"committed <hash>\"`; "
+            "OK with a note = commit the approved state, then do what the note asks (rework and post a new take, or start the work it "
+            f"asks for) before moving on, then `{cli(sid)} handled <id> --did \"<what you did about the note>\"`; "
             "an answer to your question = carry on with it.\n")
+
+
+DID_SINCE = 1793786400  # 2026-11-04 11:00 CET, when `handled --did` arrived: an OK-with-note closed the old way before it stays closed
+
+
+def handled_before_did(item_id):
+    try:
+        return os.path.getmtime(os.path.join(DIR, item_id, "handled")) < DID_SINCE
+    except OSError:
+        return False
+
+
+def ok_note(item):
+    """An OK that carries a note or images: approved, and the note is more work. Done only once the note is acted on."""
+    return item["status"] == "ok" and bool((item.get("note") or "").strip() or item.get("reply"))
 
 
 def verdict(item):
     if item.get("kind") == "question":
         return f"ANSWER to your question \"{item['title']}\" ({item['id']}): {item['note'] or '(no text)'}" + reply_paths(item)
     return (f"ANSWERED {item['status'].upper()}: {item['title']} ({item['id']})" + (f"\nnote: {item['note']}" if item["note"] else "")
-            + reply_paths(item))
+            + reply_paths(item) + ("\nThis OK has a note: commit the approved state, then act on the note before you move on." if ok_note(item) else ""))
 
 
 def id_time(item_id):
@@ -855,12 +872,13 @@ def deliver(found):
 
 
 def unresolved(sid):
-    """This session's REDO/OK verdicts it hasn't acted on: no newer item posted by it since the answer, no `handled` mark."""
+    """This session's REDO/OK verdicts it hasn't acted on: no newer item posted by it since the answer, no `handled` mark.
+    An OK with a note needs `handled --did` (what it did about the note): a commit alone leaves the note undone."""
     own = mine(sid)
     out = []
     for i in own:
         since = (i.get("answered") or "").replace("-", "").replace(":", "").replace(" ", "-")  # in the id's YYYYmmdd-HHMMSS form
-        if i["status"] not in ("redo", "ok") or marked(i["id"], "handled") is not None:
+        if i["status"] not in ("redo", "ok") or marked(i["id"], "noted" if ok_note(i) and not handled_before_did(i["id"]) else "handled") is not None:
             continue
         # posted since the answer, to the second: `created` has minutes only and ids sort by title within a second, so
         # comparing those let an item posted *before* the verdict (same minute) pass for its retake
@@ -988,7 +1006,8 @@ def respond(ev):
         if todo:
             print(json.dumps({"decision": "block", "reason": "You haven't acted on the human's verdict yet:\n" + "\n".join(verdict(i) for i in todo)
                               + f"\nREDO: rework it and post the next take (`{cli(sid)} add`). OK: finish it, then `{cli(sid)} handled <id> "
-                              "\"committed <hash>\"`. Only if you truly can't go on alone (you need the human's answer): "
+                              "\"committed <hash>\"`. OK with a note: commit the approved state, then do what the note asks (a new take, or "
+                              f"the work it asks for), then `{cli(sid)} handled <id> --did \"<what you did about the note>\"`. Only if you truly can't go on alone (you need the human's answer): "
                               f"`{cli(sid)} handled <id> \"<why>\"`, then post your question with `{cli(sid)} ask` and run `wait`."}))
             return True
         idle = [i["id"] for i in mine(sid) if not i.get("answered") and not waiting(i["id"]) and marked(i["id"], "gaveup") is None]
@@ -1357,7 +1376,8 @@ if __name__ == "__main__":
     d_.add_argument("note", help="what fixed it: commit, cause")
     h_ = sub.add_parser("handled")
     h_.add_argument("id")
-    h_.add_argument("what", help='"committed <hash>", or why you are stopping (and ask the human)')
+    h_.add_argument("what", nargs="?", help='"committed <hash>", or why you are stopping (and ask the human)')
+    h_.add_argument("--did", help="an OK with a note: what you did about the note (new take posted, work started)")
     args = ap.parse_args()
     SID = args.session or SID
     DIR = os.path.abspath(args.dir) if args.dir else DIR
@@ -1435,8 +1455,19 @@ if __name__ == "__main__":
     elif args.cmd == "handled":
         if (load(os.path.basename(args.id)).get("sid") or "") not in ("", SID):  # as revoke: a wrong id mustn't silence another session's Stop hook
             sys.exit("posted by another session, left in place")
-        mark(os.path.basename(args.id), "handled", args.what)
-        print("handled:", args.what)
+        if not (args.what or args.did):
+            sys.exit('say what you did: handled <id> "committed <hash>", and for an OK with a note --did "<what you did about it>"')
+        iid = os.path.basename(args.id)
+        i = load(iid)
+        if args.what:
+            mark(iid, "handled", args.what)
+            print("handled:", args.what)
+        if args.did:
+            mark(iid, "noted", args.did)
+            print("note acted on:", args.did)
+        elif ok_note(i):
+            print(f"This OK has a note, so it isn't done yet: act on it, then `{cli(SID)} handled {iid} --did \"<what you did>\"`."
+                  f"\nnote: {i['note']}" + reply_paths(i))
     elif args.cmd == "dismiss":
         print(answer(args.id, "dismissed", "fixed by an agent: " + args.note)["status"])
     else:

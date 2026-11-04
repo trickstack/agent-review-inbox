@@ -49,10 +49,13 @@ skill's directory. The SessionStart hook prints the full command line: use exact
      in the same turn. The retake is a **new item** (`add`): the REDO'd item stays as history, and your newer item is what
      satisfies the Stop hook.
    - **OK**: finish it (commit if your project's rules allow), then `review.py handled <id> "committed <hash>"`.
+   - **OK with a note** (or images): the take is approved and the note is more work. Commit the approved state first, then
+     do what the note asks before moving on: rework and post a new take, or start the work it asks for. Then
+     `review.py handled <id> --did "<what you did about the note>"`. A commit alone doesn't close it.
    - Truly need the human's answer before you can go on? `review.py handled <id> "<why>"`, then ask (below).
 
 The Stop hook keeps this honest. It blocks the end of your turn while a verdict on your item is unread, while a REDO or OK
-has neither a newer item from you nor a `handled` mark, or while you have an open item and no `wait` running.
+has neither a newer item from you nor a `handled` mark (for an OK with a note, `handled --did`), or while you have an open item and no `wait` running.
 
 ## Filming an interaction
 
