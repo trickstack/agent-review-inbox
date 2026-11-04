@@ -145,7 +145,7 @@
   .scard:not(.busy) .ss { color:var(--dim); }
   /* a session with subagents: it and its subagents share a colour strip along the top, so the group reads as one */
   .scard.grp::after { content:""; position:absolute; left:0; right:0; top:0; height:3px; background:var(--g); }
-  .scard.sub { background:transparent; }
+  .scard.sa { background:transparent; }
   .scard .tagsub { font:10px/1.2 var(--mono); text-transform:uppercase; letter-spacing:.06em; margin-right:6px; padding:1px 5px; vertical-align:1px; color:var(--dim); border:1px solid var(--line2); border-radius:4px; }
   .scard.done { opacity:.6; } .scard.done:hover { opacity:1; }
   .sx { position:absolute; top:4px; right:4px; width:24px; height:24px; padding:0; border:0; border-radius:6px; cursor:pointer;
@@ -478,7 +478,7 @@ function drawSessions() {
       let c = old.get(s.key);
       if (!c || c._key !== key) {
         const t = document.createElement("template");
-        t.innerHTML = `<div class="scard sub grp${s.busy ? " busy" : ""}${s.done ? " done" : ""}${s.sid === sess ? " sel" : ""}" data-sid="${esc(s.sid)}" data-key="${esc(s.key)}" style="--g:${GROUPS[s.g]}"
+        t.innerHTML = `<div class="scard sa grp${s.busy ? " busy" : ""}${s.done ? " done" : ""}${s.sid === sess ? " sel" : ""}" data-sid="${esc(s.sid)}" data-key="${esc(s.key)}" style="--g:${GROUPS[s.g]}"
           role="button" tabindex="0" title="${esc("Subagent of " + s.parent + (s.model ? " (" + s.model + ")" : ""))}"><div class="sn"><span class="tagsub">subagent</span>${esc(s.name)}</div>
           <div class="sp">of ${esc(s.parent)}</div><div class="ss"><span class="dot"></span><span class="st"></span></div>
           ${inbox ? `<div class="si">${esc(inbox)}</div>` : ""}
