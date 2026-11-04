@@ -1031,7 +1031,7 @@ def respond(ev):
 SESSIONS = os.path.join(DIR, ".sessions")
 
 
-INJECTED = ("<task-notification", "<system-reminder", "<command-", "<local-command", "[system notification", "[subagent hand-back]",
+INJECTED = ("<task-notification", "<agent-message", "<system-reminder", "<command-", "<local-command", "[system notification", "[subagent hand-back]",
             "another claude session sent a message", "[artifact comment")
 
 
