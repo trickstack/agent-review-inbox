@@ -984,7 +984,7 @@ def respond(ev):
             pass
         return
     stop = name == "Stop"
-    if name == "UserPromptSubmit" and sid:
+    if name == "UserPromptSubmit" and sid and not injected(ev.get("prompt")):
         # a reply in the chat overtakes the questions this session asked since the human's previous message; older open
         # questions stay up for an answer in the inbox, and reviews always do
         seen = os.path.join(DIR, ".prompt-" + re.sub(r"[^A-Za-z0-9_-]", "", sid))
@@ -1029,6 +1029,16 @@ def respond(ev):
 # ---------------------------------------------------------------- sessions (the cards beside the inbox)
 
 SESSIONS = os.path.join(DIR, ".sessions")
+
+
+INJECTED = ("<task-notification", "<system-reminder", "<command-", "<local-command", "[system notification", "[subagent hand-back]",
+            "another claude session sent a message", "[artifact comment")
+
+
+def injected(prompt):
+    """Prompts the harness puts in the human's slot (background-task and subagent notices, hand-backs): never the human's
+    chat answer, so they close no question and don't move the 'previous message' mark."""
+    return (prompt or "").lstrip().lower().startswith(INJECTED)
 GONE_MIN = 60  # an idle session with nothing in the inbox drops off the page after this long (no SessionEnd if it crashed)
 DONE_S = 120  # a session that finished (asked nothing, nothing open) shows "done" this long, then leaves the board
 
@@ -1440,7 +1450,11 @@ if __name__ == "__main__":
             print(f"The sheet is 3 fps: a flash or hit under ~0.3 s can fall between its frames. Check one with "
                   f"`{cli(SID)} frames {shown(os.path.join(d, media[0]))} --at <seconds>`.")
     elif args.cmd == "ask":
-        item, d = add("question", args.question, args.topic, by=args.by, options=args.options)
+        q, how = args.question, ""
+        if len(q) > 140:  # a long question: the first sentence is the card's title, the whole text goes in the context box
+            q = re.split(r"(?<=[.?!:])\s|\n", q.strip(), maxsplit=1)[0][:140]
+            how = args.question.strip()
+        item, d = add("question", q, args.topic, how=how, by=args.by, options=args.options)
         ensure_server()
         toast("Question: " + args.question, (f"{args.by}: " if args.by else "") + " / ".join(args.options))
         print(shown(d))

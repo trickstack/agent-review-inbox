@@ -162,6 +162,15 @@ assert q3["Bigger ball?"]["note"] == "answered in the chat: yes, twice as big" a
 assert not q3["Asked before any prompt?"].get("answered")  # older than the previous prompt: only the inbox answers it
 review.answer(q3["Asked before any prompt?"]["id"], "dismissed", "")
 assert "Bigger ball?" not in said, said
+# a harness notice in the human's slot answers nothing and doesn't move the mark; a long question keeps a short title
+subprocess.run([sys.executable, CLI, "--session", "q3", "ask", "Notice test?"], env=env, capture_output=True)
+prompt("q3", "<task-notification><task-id>x</task-id></task-notification>")
+assert not {i["title"]: i for i in review.items() if i["sid"] == "q3"}["Notice test?"].get("answered")
+prompt("q3", "ok that one")
+assert {i["title"]: i for i in review.items() if i["sid"] == "q3"}["Notice test?"]["note"] == "answered in the chat: ok that one"
+subprocess.run([sys.executable, CLI, "--session", "q4", "ask", "Which way? " + "More detail. " * 30], env=env, capture_output=True)
+lq = next(i for i in review.items() if i["sid"] == "q4")
+assert lq["title"] == "Which way?" and lq["how"].endswith("More detail."), lq
 
 
 def stop_after(text, active=False, sid="q2", transcript=None):
