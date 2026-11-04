@@ -1,6 +1,6 @@
 {
   "name": "agent-review-inbox",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "One inbox for every agent session: they post videos, stills and questions, you answer OK, Redo or pick an option, and the verdict goes back to the session that asked, which must act on it.",
   "author": {
     "name": "trickstack"
