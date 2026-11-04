@@ -183,8 +183,8 @@ def stop_after(text, active=False, sid="q2", transcript=None):
 
 
 # a turn that ends on a question asked in chat is pushed back once, never twice; a plain ending is left alone.
-# Only in a session that has used the inbox: a session that never posted is never nagged.
-assert stop_after("Want it brighter, or keep it as is?", sid="fresh") == ""
+# In every session, also one that never posted; not while it has an open item (its `wait` covers it).
+assert "ask" in stop_after("Want it brighter, or keep it as is?", sid="fresh")
 prompt("q2", "start")
 time.sleep(1.1)
 subprocess.run([sys.executable, CLI, "--session", "q2", "ask", "Warm-up?"], env=env, capture_output=True)
@@ -209,6 +209,16 @@ with open(tr, "w") as f:  # a go-ahead asked only in the app's closing box (wrap
                                                                        "input": {"recap": "Frames done.", "ask": "Build the photo wall now?"}}]}}) + "\n")
     f.write(json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": "Both frames are in."}]}}) + "\n")
 assert "closing next-step box" in stop_after("", transcript=tr)
+
+# the chat's AskUserQuestion pop-up is turned away to `ask`; other tools pass untouched
+def pre(tool):
+    return subprocess.run([sys.executable, CLI, "hook"], env=env, capture_output=True, text=True, input=json.dumps(
+        {"session_id": "fresh", "hook_event_name": "PreToolUse", "tool_name": tool, "tool_input": {}})).stdout
+d = json.loads(pre("AskUserQuestion"))["hookSpecificOutput"]
+assert d["permissionDecision"] == "deny" and " ask " in d["permissionDecisionReason"], d
+assert pre("Bash") == ""
+assert "Every question" in subprocess.run([sys.executable, CLI, "hook"], env=env, capture_output=True, text=True,
+                                          input=json.dumps({"session_id": "fresh", "hook_event_name": "SessionStart"})).stdout
 
 # scripted steps: ';' splits --do, a --script splits on lines only (so a typed ';' survives), bad steps fail fast
 assert review.parse_steps("click text=Save; type hi there ;key Control+S; wait 300") == [

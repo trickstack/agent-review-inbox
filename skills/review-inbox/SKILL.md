@@ -80,13 +80,13 @@ what it disables and how to install it; offer the human the install.
 The human steers through the inbox and may never see a question you ask in chat; your session then sits idle until its
 cache goes cold. So put every question for them in the inbox, not just ones about how something looks: a go-ahead, a
 choice of approach, "build X now or wait for Y?". An app's closing next-step box (a wrap_up `ask` with buttons) counts as
-chat too: once you have used the inbox, keep that box to a recap and ask here:
+chat too, and so is the AskUserQuestion pop-up (a hook turns it away): keep that box to a recap and ask here:
 
 `review.py ask "Should the trail match the ball colour or stay cyan?" --options "Match the ball" "Stay cyan"`
 
 Options become one-click buttons (keep them short), and the human can always type an answer instead. Then run
 `review.py wait` in the background like for a review. The answer comes back like a verdict: carry on with it. The Stop hook
-pushes back once if your turn ends on a question with nothing posted.
+pushes back once if your turn ends on a question with nothing posted, whether or not you've used the inbox before.
 
 ## Other commands
 

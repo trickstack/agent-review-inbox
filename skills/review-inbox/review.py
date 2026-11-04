@@ -15,7 +15,7 @@
     review.py revoke <id>           take your own unanswered item down (e.g. before posting a retake)
     review.py dismiss <id> "<note>" close an open item that no longer needs an answer (superseded, already fixed)
     review.py serve                 the review page (also started on demand by `add`)
-    review.py hook                  Claude Code hook (SessionStart, UserPromptSubmit, Stop): hands a session its verdicts
+    review.py hook                  Claude Code hook (SessionStart, UserPromptSubmit, PreToolUse, Stop): hands a session its verdicts
 
 Storage: one inbox per user, ~/.review-inbox/<id>/ (item.json + media): every project's agents post to the same page, and
 each item names its project. One folder per item, so parallel sessions never write the same file. Status: open -> ok | redo | dismissed, or open -> answered for a question (`ask`).
@@ -962,6 +962,7 @@ def safe_hook():
 
 def respond(ev):
     """Claude Code hook. SessionStart: tells the agent the inbox exists. UserPromptSubmit: verdicts arrive with the prompt.
+    PreToolUse: AskUserQuestion is turned away to `ask`.
     Stop: the turn can't end before the agent has read a verdict, acted on it, and armed `wait` for its open items.
     True when it blocked the turn."""
     sid, name = ev.get("session_id", ""), ev.get("hook_event_name")
@@ -969,7 +970,9 @@ def respond(ev):
         return
     if name == "SessionStart":
         print(f"You have a review inbox ({PAGE}). When you finish something a human has to judge by eye, ear or feel "
-              f"(UI, visuals, animation, motion, sound, copy), post it there instead of asking in chat: see the review-inbox skill. CLI (use exactly this, it carries your session): {cli(sid)}"
+              f"(UI, visuals, animation, motion, sound, copy), post it there instead of asking in chat. Every question or decision "
+              f"for the human goes there too (`ask`), whatever the task: they steer from the inbox and may never read the chat. "
+              f"See the review-inbox skill. CLI (use exactly this, it carries your session): {cli(sid)}"
               + (" (in PowerShell, put `& ` in front)" if os.name == "nt" else ""))
         try:  # only in a project that already uses the inbox: every other session hears nothing about capture tools
             missing = doctor() if items() else []
@@ -983,6 +986,11 @@ def respond(ev):
         except OSError:
             pass
         return
+    if name == "PreToolUse" and ev.get("tool_name") == "AskUserQuestion":  # a pop-up in the chat the human may never see
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason":
+              f"The human answers questions in the review inbox, not in the chat: post it with `{cli(sid)} ask \"<question>\" "
+              "[--options A B ...]` and run `wait` as a background command."}}))
+        return True
     stop = name == "Stop"
     if name == "UserPromptSubmit" and sid and not injected(ev.get("prompt")):
         # a reply in the chat overtakes the questions this session asked since the human's previous message; older open
@@ -1016,10 +1024,8 @@ def respond(ev):
                               f"run `{cli(sid)} wait` as a background command (run_in_background), then end your turn."}))
             return True
         # the human steers through the inbox and misses questions asked in chat, or in the app's closing next-step box
-        # (wrap_up's `ask`): catch a turn that ends on one, once. Only in a session that has used the inbox; anywhere else
-        # a question in chat is just a question.
-        own = mine(sid)
-        if own and not any(not i.get("answered") for i in own) and asked(ev):
+        # (wrap_up's `ask`): catch a turn that ends on one, once, in every session (one that never posted asks in chat too)
+        if not any(not i.get("answered") for i in mine(sid)) and asked(ev):
             print(json.dumps({"decision": "block", "reason": f"If that's a question for the human (in your reply or the closing next-step box), "
                               f"post it with `{cli(sid)} ask \"<question>\" [--options A B ...]` and run `wait` as a background command; "
                               "otherwise just end your turn."}))

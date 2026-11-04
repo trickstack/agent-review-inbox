@@ -99,7 +99,7 @@ for two minutes and leaves; × takes one off by hand. Either comes back when the
 show only its items. The hooks keep this up to date; a session's name comes from Claude Code when it's known, else from its
 first prompt.
 
-Questions land there too. When an agent needs you to decide something, it posts the question with `review.py ask`, optionally with one-click options, instead of asking in a chat you might never look at. The Stop hook catches a turn that ends on a question asked in chat.
+Questions land there too. When an agent needs you to decide something, it posts the question with `review.py ask`, optionally with one-click options, instead of asking in a chat you might never look at. The Stop hook catches a turn that ends on a question asked in chat, in any session, and the chat's AskUserQuestion pop-up is turned away to `ask`.
 
 Clips are rendered, not filmed off your screen, so you can keep watching something fullscreen while agents work:
 
